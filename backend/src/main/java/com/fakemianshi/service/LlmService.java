@@ -30,6 +30,15 @@ public interface LlmService {
     LlmResponse chat(List<Message> messages, int maxTokens);
 
     /**
+     * 流式对话：启用 stream 模式，输出内容通过 onDelta 逐段回调（用于 SSE 推送），
+     * 返回完整拼接后的内容文本。
+     *
+     * @param onDelta 输出增量回调（可为 null）
+     */
+    String chatStream(String systemPrompt, String userPrompt, int maxTokens,
+                      java.util.function.Consumer<String> onDelta);
+
+    /**
      * 对话消息。
      */
     record Message(String role, String content) {}

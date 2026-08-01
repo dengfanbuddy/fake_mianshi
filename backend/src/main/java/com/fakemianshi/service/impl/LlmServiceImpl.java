@@ -96,7 +96,7 @@ public class LlmServiceImpl implements LlmService {
 
         String requestJson;
         try {
-            requestJson = buildRequestBody(config, messages, maxTokens);
+            requestJson = buildRequestBody(config, messages, maxTokens, false);
         } catch (JacksonException e) {
             throw new BusinessException("AI模型请求体构建失败: " + e.getMessage(), e);
         }
@@ -105,10 +105,32 @@ public class LlmServiceImpl implements LlmService {
         return parseResponse(responseBody);
     }
 
+    @Override
+    public String chatStream(String systemPrompt, String userPrompt, int maxTokens,
+                             java.util.function.Consumer<String> onDelta) {
+        AIModelConfig config = configRepository.findByIsActiveTrue()
+                .orElseThrow(() -> new BusinessException("未配置可用的AI模型，请在设置中配置"));
+
+        List<Message> messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            messages.add(new Message("system", systemPrompt));
+        }
+        messages.add(new Message("user", userPrompt));
+
+        String requestJson;
+        try {
+            requestJson = buildRequestBody(config, messages, maxTokens, true);
+        } catch (JacksonException e) {
+            throw new BusinessException("AI模型请求体构建失败: " + e.getMessage(), e);
+        }
+        return doPostStream(config, requestJson, onDelta);
+    }
+
     /**
      * 构建 OpenAI 兼容的 chat/completions 请求体（model, messages, temperature, max_tokens, stream）。
      */
-    private String buildRequestBody(AIModelConfig config, List<Message> messages, int maxTokens) throws JacksonException {
+    private String buildRequestBody(AIModelConfig config, List<Message> messages, int maxTokens, boolean stream)
+            throws JacksonException {
         ObjectNode root = OBJECT_MAPPER.createObjectNode();
         root.put("model", config.getModelName());
         ArrayNode messagesNode = root.putArray("messages");
@@ -119,8 +141,75 @@ public class LlmServiceImpl implements LlmService {
         }
         root.put("temperature", 0.7);
         root.put("max_tokens", maxTokens > 0 ? maxTokens : DEFAULT_MAX_TOKENS);
-        root.put("stream", false);
+        root.put("stream", stream);
         return OBJECT_MAPPER.writeValueAsString(root);
+    }
+
+    /**
+     * 流式 POST：逐行解析 SSE（data: {...}），提取 choices[0].delta.content 增量回调，返回完整拼接内容。
+     */
+    private String doPostStream(AIModelConfig config, String requestJson, java.util.function.Consumer<String> onDelta) {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(config.getApiUrl()))
+                .header("Authorization", "Bearer " + config.getApiKey())
+                .header("Content-Type", "application/json")
+                // 流式长任务（出题），超时放宽
+                .timeout(Duration.ofSeconds(180))
+                .POST(HttpRequest.BodyPublishers.ofString(requestJson, StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<java.io.InputStream> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new BusinessException("AI模型调用失败: " + e.getMessage(), e);
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            String errBody = readErrorBody(response);
+            throw new BusinessException("AI模型调用失败，状态码: " + response.statusCode() + "，响应: " + errBody);
+        }
+
+        StringBuilder full = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) {
+                    continue;
+                }
+                String data = line.substring(5).trim();
+                if (data.isEmpty() || "[DONE]".equals(data)) {
+                    continue;
+                }
+                try {
+                    JsonNode node = OBJECT_MAPPER.readTree(data);
+                    JsonNode content = node.path("choices").path(0).path("delta").path("content");
+                    if (!content.isMissingNode() && content.isTextual() && !content.asText().isEmpty()) {
+                        String delta = content.asText();
+                        full.append(delta);
+                        if (onDelta != null) {
+                            onDelta.accept(delta);
+                        }
+                    }
+                } catch (JacksonException ignored) {
+                    // 跳过无法解析的行（如 keep-alive 注释）
+                }
+            }
+        } catch (IOException e) {
+            throw new BusinessException("AI流式响应读取失败: " + e.getMessage(), e);
+        }
+        return full.toString();
+    }
+
+    private String readErrorBody(HttpResponse<java.io.InputStream> response) {
+        try (java.io.InputStream in = response.body()) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     /**

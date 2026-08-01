@@ -25,18 +25,16 @@ public class AnalysisController {
     private final AnalysisService analysisService;
 
     /**
-     * 获取会话分析报告；若尚未生成则自动触发分析后再返回，方便前端直接调用。
+     * 获取会话分析报告；尚未生成时异步触发生成并返回 null，前端轮询等待（避免同步阻塞 60s+）。
      */
     @GetMapping("/session/{sessionId}")
     public ApiResponse<AnalysisResultDTO> sessionAnalysis(@PathVariable Long sessionId) {
-        AnalysisResultDTO dto;
         try {
-            dto = analysisService.getSessionAnalysis(sessionId);
+            return ApiResponse.success(analysisService.getSessionAnalysis(sessionId));
         } catch (ResourceNotFoundException e) {
-            analysisService.analyzeSession(sessionId);
-            dto = analysisService.getSessionAnalysis(sessionId);
+            analysisService.triggerAnalyze(sessionId);
+            return ApiResponse.success(null);
         }
-        return ApiResponse.success(dto);
     }
 
     /**

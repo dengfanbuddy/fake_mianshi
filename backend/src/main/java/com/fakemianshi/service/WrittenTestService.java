@@ -17,6 +17,13 @@ public interface WrittenTestService {
     WrittenTestStartResponse start(Long projectId, WrittenTestStartRequest req);
 
     /**
+     * 流式开始笔试：创建会话，题目生成过程通过 onDelta 推送增量文本（SSE 展示），
+     * 完成后返回与 {@link #start} 相同的响应。
+     */
+    WrittenTestStartResponse streamStart(Long projectId, WrittenTestStartRequest req,
+                                         java.util.function.Consumer<String> onDelta);
+
+    /**
      * 提交笔试：逐题判分，汇总总分，将会话标记为已完成。
      */
     WrittenTestSubmitResponse submit(Long sessionId, WrittenTestSubmitRequest req);

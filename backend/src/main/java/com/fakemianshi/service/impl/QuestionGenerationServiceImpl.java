@@ -49,7 +49,34 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     @Override
     @Transactional
     public List<WrittenTestQuestion> generateWrittenTestQuestions(Long sessionId, Long projectId, int questionCount) {
-        String systemPrompt = """
+        String systemPrompt = buildWrittenTestPrompt(questionCount);
+        String userPrompt = buildContext(projectId);
+        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
+        List<JsonNode> items = parseQuestionArray(extractJsonSection(response.getContent()));
+
+        return saveQuestions(items, sessionId);
+    }
+
+    @Override
+    @Transactional
+    public List<WrittenTestQuestion> generateWrittenTestQuestionsStream(
+            Long sessionId, Long projectId, int questionCount,
+            java.util.function.Consumer<String> onDelta) {
+        String systemPrompt = buildWrittenTestPrompt(questionCount);
+        String userPrompt = buildContext(projectId);
+        String fullOutput = llmService.chatStream(systemPrompt, userPrompt,
+                LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta);
+        List<JsonNode> items = parseQuestionArray(extractJsonSection(fullOutput));
+        return saveQuestions(items, sessionId);
+    }
+
+    /**
+     * 构建笔试出题 system prompt：双输出设计——
+     * ① Markdown 展示部分（流式推给前端实时渲染，用户边等边看题）；
+     * ② 以单独一行 ==JSON_START== 为界，输出严格 JSON 数组（自动判分/存库用，前端不展示）。
+     */
+    private String buildWrittenTestPrompt(int questionCount) {
+        return """
                 你是资深 Java 面试出题官。请根据职位需求、简历、弱点标签生成 %d 道笔试题。
                 题型分配：单选30%%，多选20%%，填空20%%，简答30%%。
                 要求：
@@ -57,18 +84,39 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
                 2. 弱点标签中列出的知识点必须出题；
                 3. 题目难度要适配候选人资历级别；
                 4. 题目要贴近真实面试。
-                请严格返回一个 JSON 数组，不要输出任何额外文字或 Markdown 代码块。
-                数组每项格式如下：
+
+                【输出要求】
+                第一部分（Markdown 展示）：用 Markdown 格式输出全部题目，每道题格式如下：
+                ### 1. [单选题] 题目内容
+                - A. 选项一
+                - B. 选项二
+                - C. 选项三
+                - D. 选项四
+                （注意：展示部分不要写出答案和解析）
+
+                第二部分（结构化数据）：展示部分结束后，单独一行输出 ==JSON_START==，
+                其后输出一个严格 JSON 数组（不要输出任何其他文字、代码块围栏或注释），数组每项格式：
                 {"type":"SINGLE_CHOICE","content":"...","options":["A","B","C","D"],"answer":"A","explanation":"...","knowledgePoints":["JVM"]}
                 说明：
                 - 填空题/简答题的 options 为 null；
-                - type 枚举：SINGLE_CHOICE / MULTIPLE_CHOICE / FILL_BLANK / SHORT_ANSWER。
+                - type 枚举：SINGLE_CHOICE / MULTIPLE_CHOICE / FILL_BLANK / SHORT_ANSWER；
+                - JSON 数组项数与 Markdown 展示的题目数必须一致。
                 """.formatted(questionCount);
+    }
 
-        String userPrompt = buildContext(projectId);
-        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
-        List<JsonNode> items = parseQuestionArray(response.getContent());
+    /** 从双输出中提取 ==JSON_START== 之后的 JSON 部分 */
+    private String extractJsonSection(String output) {
+        if (output == null) {
+            return "";
+        }
+        int idx = output.indexOf("==JSON_START==");
+        if (idx < 0) {
+            return output;
+        }
+        return output.substring(idx + "==JSON_START==".length());
+    }
 
+    private List<WrittenTestQuestion> saveQuestions(List<JsonNode> items, Long sessionId) {
         List<WrittenTestQuestion> questions = new ArrayList<>();
         int orderNum = 1;
         for (JsonNode item : items) {

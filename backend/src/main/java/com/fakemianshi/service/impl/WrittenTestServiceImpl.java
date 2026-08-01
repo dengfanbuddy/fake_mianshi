@@ -69,12 +69,32 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     @Override
     @Transactional
     public WrittenTestStartResponse start(Long projectId, WrittenTestStartRequest req) {
+        InterviewSession session = createSession(projectId, req);
+
+        int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
+        List<WrittenTestQuestion> questions =
+                questionGenerationService.generateWrittenTestQuestions(session.getId(), projectId, questionCount);
+        return buildStartResponse(session, questions);
+    }
+
+    @Override
+    @Transactional
+    public WrittenTestStartResponse streamStart(Long projectId, WrittenTestStartRequest req,
+                                                java.util.function.Consumer<String> onDelta) {
+        InterviewSession session = createSession(projectId, req);
+
+        int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
+        List<WrittenTestQuestion> questions = questionGenerationService
+                .generateWrittenTestQuestionsStream(session.getId(), projectId, questionCount, onDelta);
+        return buildStartResponse(session, questions);
+    }
+
+    /** 校验项目并创建笔试会话（含默认时长/题数） */
+    private InterviewSession createSession(Long projectId, WrittenTestStartRequest req) {
         // 校验项目存在
         projectService.findById(projectId);
 
         int timeLimit = req != null && req.getTimeLimit() != null ? req.getTimeLimit() : DEFAULT_TIME_LIMIT;
-        int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
-
         InterviewSession session = new InterviewSession();
         session.setProjectId(projectId);
         session.setType("WRITTEN");
@@ -82,15 +102,15 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         session.setTimeLimit(timeLimit);
         session.setStartedAt(LocalDateTime.now());
         sessionRepository.insert(session);
+        return session;
+    }
 
-        List<WrittenTestQuestion> questions =
-                questionGenerationService.generateWrittenTestQuestions(session.getId(), projectId, questionCount);
-
+    private WrittenTestStartResponse buildStartResponse(InterviewSession session, List<WrittenTestQuestion> questions) {
         List<ExamQuestion> examQuestions = questions.stream().map(this::toExamQuestion).toList();
 
         WrittenTestStartResponse response = new WrittenTestStartResponse();
         response.setSessionId(session.getId());
-        response.setTimeLimit(timeLimit);
+        response.setTimeLimit(session.getTimeLimit());
         response.setQuestions(examQuestions);
         return response;
     }

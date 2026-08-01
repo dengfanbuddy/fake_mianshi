@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -9,7 +9,7 @@ import {
   probeWrittenTestDetail,
 } from '../../api/analysis'
 import { getSessionInfo } from '../../api/session'
-import { WarningFilled, ChatDotRound, ArrowLeft, Refresh } from '@element-plus/icons-vue'
+import { WarningFilled, ChatDotRound, ArrowLeft, Refresh, Loading } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +26,13 @@ const loading = ref(true)
 const messageLoading = ref(false)
 const dialogVisible = ref(false)
 const refreshing = ref(false)
+
+// 分析生成中轮询状态
+const generating = ref(false)
+const generateElapsed = ref(0)
+const generateTimedOut = ref(false)
+const GENERATE_TIMEOUT = 180 // 生成超时（秒）
+let generateTimer = null
 
 // 单题折叠面板展开项
 const activeNames = ref([])
@@ -222,16 +229,6 @@ async function loadMessages() {
 
 async function fetchAll() {
   loading.value = true
-  try {
-    const res = await getSessionAnalysis(sessionId)
-    if (res.code === 200) {
-      analysis.value = res.data
-    } else {
-      ElMessage.error(res.message || '加载分析报告失败')
-    }
-  } catch (e) {
-    // 拦截器已提示
-  }
 
   // 未带 projectId 时，从会话信息获取所属项目（保证返回能回到项目页）
   if (!projectId.value) {
@@ -254,14 +251,61 @@ async function fetchAll() {
     sessionType.value = 'interview'
   }
 
-  if (sessionType.value === 'written') {
-    // 笔试：默认展开全部单题
-    activeNames.value = mergedQuestions.value.map((_, i) => i)
-  } else {
-    activeNames.value = mergedQuestions.value.map((_, i) => i)
+  if (sessionType.value === 'interview') {
     await loadMessages()
   }
+  // 笔试/面试：默认展开全部单题
+  activeNames.value = mergedQuestions.value.map((_, i) => i)
+
+  // 加载分析：未生成则进入轮询等待（后端已异步触发生成）
+  const ok = await fetchAnalysisOnce()
+  if (!ok) {
+    startGeneratePolling()
+  }
   loading.value = false
+}
+
+/** 拉取一次分析；成功返回 true 并填充数据 */
+async function fetchAnalysisOnce() {
+  try {
+    const res = await getSessionAnalysis(sessionId)
+    if (res.code === 200 && res.data) {
+      analysis.value = res.data
+      return true
+    }
+    return false
+  } catch (e) {
+    // 拦截器已提示（分析不存在时后端返回成功+null，不走异常）
+    return false
+  }
+}
+
+/** 分析未生成时轮询等待，每 5 秒一次，超时后停止并提示 */
+function startGeneratePolling() {
+  generating.value = true
+  generateElapsed.value = 0
+  generateTimedOut.value = false
+  if (generateTimer) clearInterval(generateTimer)
+  generateTimer = setInterval(async () => {
+    generateElapsed.value += 5
+    if (generateElapsed.value >= GENERATE_TIMEOUT) {
+      stopGeneratePolling()
+      generateTimedOut.value = true
+      return
+    }
+    const ok = await fetchAnalysisOnce()
+    if (ok) {
+      stopGeneratePolling()
+    }
+  }, 5000)
+}
+
+function stopGeneratePolling() {
+  if (generateTimer) {
+    clearInterval(generateTimer)
+    generateTimer = null
+  }
+  generating.value = false
 }
 
 // 重新生成分析报告
@@ -309,6 +353,8 @@ function playReplay(audioPath) {
 }
 
 onMounted(fetchAll)
+
+onBeforeUnmount(stopGeneratePolling)
 </script>
 
 <template>
@@ -337,7 +383,20 @@ onMounted(fetchAll)
     </header>
 
     <main class="report-body" v-loading="loading">
-      <template v-if="!loading && analysis">
+      <!-- 分析生成中：进度提示 + 自动轮询 -->
+      <div v-if="generating" class="generating-panel">
+        <el-icon :size="44" class="is-loading" color="#409eff"><Loading /></el-icon>
+        <div class="gen-title">AI 正在生成分析报告</div>
+        <div class="gen-sub">通常需要 30-60 秒，生成完成后会自动展示，请稍候…</div>
+        <div class="gen-elapsed">已等待 {{ generateElapsed }} 秒</div>
+      </div>
+      <!-- 生成超时：提示稍后刷新 -->
+      <div v-else-if="generateTimedOut && !analysis" class="generating-panel">
+        <el-icon :size="44" color="#e6a23c"><WarningFilled /></el-icon>
+        <div class="gen-title">分析生成较慢</div>
+        <div class="gen-sub">已等待超过 {{ GENERATE_TIMEOUT }} 秒仍未完成，可稍后刷新页面查看，或点击右上角「重新生成分析」。</div>
+      </div>
+      <template v-else-if="!loading && analysis">
         <!-- 1. 顶部概览卡 -->
         <section class="card overview-card">
           <div class="overview-left">
@@ -718,6 +777,30 @@ onMounted(fetchAll)
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+.generating-panel {
+  background: #fff;
+  border-radius: 12px;
+  padding: 56px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+.gen-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+}
+.gen-sub {
+  font-size: 13px;
+  color: #606266;
+  text-align: center;
+}
+.gen-elapsed {
+  font-size: 12px;
+  color: #909399;
 }
 
 .card {

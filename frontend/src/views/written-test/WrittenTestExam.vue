@@ -2,8 +2,15 @@
 import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { marked } from 'marked'
 import { submitTest } from '../../api/written-test'
 import { useWrittenTestStore } from '../../stores/writtenTest'
+
+// 题目内容支持 markdown 渲染（代码块、列表等）
+function renderMd(text) {
+  if (!text) return ''
+  return marked.parse(text)
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -122,8 +129,15 @@ async function handleSubmit() {
     const res = await submitTest(sessionId, buildAnswers())
     if (res.code === 200) {
       const pid = store.session?.projectId
+      const flow = store.session?.flow
       store.clear()
-      router.push({ path: `/written-test/result/${sessionId}`, query: pid ? { projectId: pid } : {} })
+      if (flow === 'full') {
+        // 完整流程：笔试完成 → 自动进入模拟面试（参考笔试结果）
+        ElMessage.success('笔试完成，开始模拟面试！')
+        router.push(`/mock-interview/${pid}?refWritten=1`)
+      } else {
+        router.push({ path: `/written-test/result/${sessionId}`, query: pid ? { projectId: pid } : {} })
+      }
     } else {
       ElMessage.error(res.message || '提交失败')
     }
@@ -184,7 +198,7 @@ onBeforeUnmount(() => {
                   {{ typeLabel[q.type] || q.type }}
                 </el-tag>
               </div>
-              <div class="q-content">{{ q.content }}</div>
+              <div class="q-content markdown-body" v-html="renderMd(q.content)"></div>
 
               <!-- 单选题 -->
               <el-radio-group v-if="q.type === 'SINGLE_CHOICE'" v-model="answers[q.id]" class="q-options">
@@ -367,8 +381,30 @@ onBeforeUnmount(() => {
   line-height: 1.6;
   color: #303133;
   margin-bottom: 14px;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+.q-content :deep(h1), .q-content :deep(h2), .q-content :deep(h3), .q-content :deep(h4) {
+  font-size: 15px;
+  margin: 8px 0 4px;
+}
+.q-content :deep(ul), .q-content :deep(ol) {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.q-content :deep(p) {
+  margin: 4px 0;
+}
+.q-content :deep(code) {
+  background: #f0f2f5;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 13px;
+}
+.q-content :deep(pre) {
+  background: #f6f8fa;
+  border-radius: 6px;
+  padding: 10px;
+  overflow-x: auto;
 }
 .q-options {
   display: flex;

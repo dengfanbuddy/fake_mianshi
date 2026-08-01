@@ -124,6 +124,33 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final HistoricalAnalysisRepository historicalAnalysisRepository;
     private final LlmService llmService;
 
+    /** 分析生成中标记（防重复触发） */
+    private final java.util.Set<Long> analyzingSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** 分析异步生成线程池 */
+    private final java.util.concurrent.ExecutorService analysisExecutor =
+            java.util.concurrent.Executors.newCachedThreadPool();
+
+    @Override
+    public void triggerAnalyze(Long sessionId) {
+        // 已存在分析则无需生成
+        if (!sessionAnalysisRepository.findBySessionId(sessionId).isEmpty()) {
+            return;
+        }
+        if (!analyzingSessions.add(sessionId)) {
+            return; // 已在生成中
+        }
+        analysisExecutor.execute(() -> {
+            try {
+                analyzeSession(sessionId);
+            } catch (Exception e) {
+                log.warn("会话分析异步生成失败: sessionId={}, cause={}", sessionId, e.getMessage());
+            } finally {
+                analyzingSessions.remove(sessionId);
+            }
+        });
+    }
+
     @Override
     @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {

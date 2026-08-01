@@ -3,7 +3,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:sqlite:./data/test_fake_mianshi.db
+    url: jdbc:sqlite:${java.io.tmpdir}/fm_test_mianshi.db
     driver-class-name: org.sqlite.JDBC
   sql:
     init:

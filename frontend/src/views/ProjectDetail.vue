@@ -342,6 +342,24 @@ async function handleDeleteSession(sessionId) {
   }
 }
 
+// 完整流程：先笔试再模拟面试。已有完成的笔试则直接进面试（参考笔试结果），否则先进笔试
+async function startFullFlow() {
+  try {
+    const res = await getSessionsByProject(projectId)
+    const hasWritten = (res.data || []).some(
+      (s) => s.type === 'WRITTEN' && s.status === 'COMPLETED'
+    )
+    if (hasWritten) {
+      router.push(`/mock-interview/${projectId}?refWritten=1`)
+    } else {
+      router.push(`/written-test/start/${projectId}?flow=full`)
+    }
+  } catch (e) {
+    // 查询失败则按无笔试处理，先进笔试
+    router.push(`/written-test/start/${projectId}?flow=full`)
+  }
+}
+
 function viewReport(sessionId) {
   router.push({ path: `/analysis/session/${sessionId}`, query: { projectId } })
 }
@@ -616,7 +634,7 @@ onMounted(() => {
         <div class="start-buttons">
           <el-button type="primary" @click="router.push(`/written-test/start/${projectId}`)">📝 笔试</el-button>
           <el-button type="success" @click="router.push(`/mock-interview/${projectId}`)">🗣️ 模拟面试</el-button>
-          <el-button type="warning" @click="router.push(`/mock-interview/${projectId}?refWritten=1`)">🚀 完整流程</el-button>
+          <el-button type="warning" @click="startFullFlow">🚀 完整流程</el-button>
         </div>
 
         <el-table

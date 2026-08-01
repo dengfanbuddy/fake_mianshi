@@ -15,6 +15,14 @@ public interface QuestionGenerationService {
     List<WrittenTestQuestion> generateWrittenTestQuestions(Long sessionId, Long projectId, int questionCount);
 
     /**
+     * 流式生成笔试题：LLM 以「markdown 展示 + ==JSON_START== + JSON」双输出，
+     * 增量文本通过 onDelta 回调（供 SSE 实时推送展示），完整输出解析后保存题目并返回。
+     */
+    List<WrittenTestQuestion> generateWrittenTestQuestionsStream(
+            Long sessionId, Long projectId, int questionCount,
+            java.util.function.Consumer<String> onDelta);
+
+    /**
      * 生成模拟面试大纲（JSON 文本），返回给前端展示。
      */
     String generateMockInterviewOutline(Long projectId);

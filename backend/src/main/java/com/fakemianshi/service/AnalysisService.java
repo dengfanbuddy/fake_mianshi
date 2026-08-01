@@ -49,4 +49,10 @@ public interface AnalysisService {
      * 强制重新生成会话分析（controller 用）：先删除旧分析再重新生成。
      */
     AnalysisResultDTO refreshAnalysis(Long sessionId);
+
+    /**
+     * 异步触发会话分析：分析不存在且当前未在生成中时，后台线程生成，立即返回。
+     * 用于报告页轮询场景，避免同步阻塞 LLM 调用（可达 60s+）。
+     */
+    void triggerAnalyze(Long sessionId);
 }
