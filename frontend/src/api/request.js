@@ -13,6 +13,10 @@ request.interceptors.response.use(
     return data
   },
   error => {
+    // 主动取消（如出题超时中止）不弹错误提示，由调用方自行处理
+    if (error?.code === 'ERR_CANCELED' || axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
     ElMessage.error(error.response?.data?.message || '请求失败')
     return Promise.reject(error)
   }
