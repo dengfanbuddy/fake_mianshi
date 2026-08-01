@@ -12,3 +12,6 @@ data/
 test_silence.wav
 backend-run.log
 backend-run-err.log
+test_silence.wav
+backend-run.log
+backend-run-err.log
