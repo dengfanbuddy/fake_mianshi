@@ -23,13 +23,28 @@ public class AnalysisResultDTO {
     /** 不足之处 */
     private List<String> weaknesses;
 
-    /** 知识盲区（具体知识点） */
-    private List<String> knowledgeGaps;
+    /** 知识盲区（元素为 {"point":"知识点","explanation":"答案要点"}，兼容旧版纯字符串） */
+    private List<Object> knowledgeGaps;
+
+    /** 能力等级（如 中级工程师） */
+    private String overallLevel;
+
+    /** 预期薪资范围（如 20k-30k） */
+    private String expectedSalaryRange;
+
+    /** 性格总结 */
+    private String personalitySummary;
+
+    /** 性格特质列表 */
+    private List<String> characterTraits;
+
+    /** 性格缺陷与改进（元素为 {"defect":"...","improvement":"..."}） */
+    private List<Object> characterDefects;
 
     /** 沟通表达评估（仅模拟面试） */
     private String communicationEvaluation;
 
-    /** 改进计划 {topics: [...], suggestions: [...]} */
+    /** 改进计划 {topics: [{topic,action,example}], suggestions: [...]} */
     private Map<String, Object> improvementPlan;
 
     /** 逐题分析列表 */

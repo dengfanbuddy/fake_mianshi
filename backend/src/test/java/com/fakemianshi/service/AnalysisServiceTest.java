@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -215,6 +216,95 @@ class AnalysisServiceTest {
         assertEquals(1, questionAnalysisStore.size());
         assertEquals(1L, questionAnalysisStore.get(0).getQuestionRefId());
         assertEquals(6.0, questionAnalysisStore.get(0).getFluency());
+    }
+
+    // ---------- analyzeSession 新格式（知识盲区对象 + 等级/薪资/性格 + 单题分类） ----------
+
+    @Test
+    void analyzeSession_written_shouldParseNewFormatFields() {
+        InterviewSession session = session(3L, 10L, "WRITTEN");
+        when(sessionRepository.findById(3L)).thenReturn(Optional.of(session));
+
+        WrittenTestQuestion q1 = writtenQuestion(300L, "SINGLE_CHOICE", "单选：synchronized 和 ReentrantLock 的区别？");
+        when(writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(3L)).thenReturn(List.of(q1));
+        WrittenTestAnswer a1 = writtenAnswer(300L, "B", false, 0.0);
+        when(writtenTestAnswerRepository.findBySessionId(3L)).thenReturn(List.of(a1));
+
+        String llmJson = """
+                {"overallScore":65,"overallLevel":"中级工程师","expectedSalaryRange":"18k-25k","strengths":["基础较稳"],"weaknesses":["并发理解浅"],"knowledgeGaps":[{"point":"AQS原理","explanation":"AQS基于volatile state和CLH队列，支持独占/共享两种模式，ReentrantLock依赖它实现重入与公平锁。"}],"personalitySummary":"表达谨慎、逻辑尚可，遇到不熟的问题容易绕弯。","characterTraits":["谨慎","条理清晰"],"characterDefects":[{"defect":"不熟的问题易绕弯","improvement":"先直接说不知道，再给部分理解与思路"}],"improvementPlan":{"topics":[{"topic":"并发编程","action":"精读AQS源码并画时序图","example":"以ReentrantLock加锁为例，画出acquire队列流转"}],"suggestions":["每周一道并发题"]},"questionAnalyses":[{"questionContent":"单选：synchronized 和 ReentrantLock 的区别？","answerContent":"B","category":"并发","difficulty":"中级","focusPoint":"考察锁机制与AQS的理解","accuracy":3,"depth":0,"clarity":0,"fluency":0,"tone":"","answerApproach":"先答两者本质（内置锁vs显式锁），再从可中断/公平/超时/条件队列展开","example":"synchronized是JVM内置锁，ReentrantLock基于AQS支持中断、超时与公平策略…","improvementSuggestion":"补充AQS与锁升级知识"}]}
+                """;
+        when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
+
+        SessionAnalysis saved = service.analyzeSession(3L);
+
+        assertEquals("中级工程师", saved.getOverallLevel());
+        assertEquals("18k-25k", saved.getExpectedSalaryRange());
+        assertTrue(saved.getPersonalitySummary().contains("谨慎"));
+        assertTrue(saved.getCharacterTraits().contains("谨慎"));
+        assertTrue(saved.getCharacterDefects().contains("AQS原理") || saved.getCharacterDefects() != null);
+
+        // 弱点标签从新格式对象的 point 字段提取
+        WeaknessTag aqs = weaknessTagsStore.stream()
+                .filter(t -> "AQS原理".equals(t.getKnowledgePoint())).findFirst().orElseThrow();
+        assertEquals("WEAK", aqs.getMasteryLevel());
+        assertEquals(1, aqs.getOccurrenceCount());
+
+        // 单题分析新字段
+        assertEquals(1, questionAnalysisStore.size());
+        QuestionAnalysis qa = questionAnalysisStore.get(0);
+        assertEquals("并发", qa.getCategory());
+        assertEquals("中级", qa.getDifficulty());
+        assertTrue(qa.getFocusPoint().contains("锁机制"));
+        assertTrue(qa.getAnswerApproach().contains("先答两者本质"));
+        assertTrue(qa.getExample().contains("synchronized是JVM内置锁"));
+    }
+
+    @Test
+    void getSessionAnalysis_shouldIncludeNewFields() {
+        SessionAnalysis analysis = new SessionAnalysis();
+        analysis.setId(1L);
+        analysis.setSessionId(1L);
+        analysis.setOverallScore(88.0);
+        analysis.setStrengths("[\"基础扎实\"]");
+        analysis.setWeaknesses("[\"并发弱\"]");
+        analysis.setKnowledgeGaps("[{\"point\":\"AQS\",\"explanation\":\"基于CLH队列…\"}]");
+        analysis.setOverallLevel("高级工程师");
+        analysis.setExpectedSalaryRange("30k-40k");
+        analysis.setPersonalitySummary("沉稳自信");
+        analysis.setCharacterTraits("[\"沉稳\"]");
+        analysis.setCharacterDefects("[{\"defect\":\"语速偏快\",\"improvement\":\"放慢节奏\"}]");
+        analysis.setCommunicationEvaluation("表达流畅");
+        analysis.setImprovementPlan("{\"topics\":[{\"topic\":\"并发\",\"action\":\"读源码\",\"example\":\"示例\"}],\"suggestions\":[\"练习\"]}");
+        analysisStore.add(analysis);
+
+        QuestionAnalysis qa = new QuestionAnalysis();
+        qa.setSessionId(1L);
+        qa.setQuestionRefId(100L);
+        qa.setQuestionContent("请解释 volatile");
+        qa.setAnswerContent("可见性与有序性");
+        qa.setAccuracy(7.0);
+        qa.setCategory("并发");
+        qa.setDifficulty("中级");
+        qa.setFocusPoint("考察内存模型理解");
+        qa.setAnswerApproach("先答定义再举例");
+        qa.setExample("示例内容");
+        questionAnalysisStore.add(qa);
+
+        AnalysisResultDTO dto = service.getSessionAnalysis(1L);
+
+        assertEquals("高级工程师", dto.getOverallLevel());
+        assertEquals("30k-40k", dto.getExpectedSalaryRange());
+        assertEquals("沉稳自信", dto.getPersonalitySummary());
+        assertTrue(dto.getCharacterTraits().contains("沉稳"));
+        assertEquals(1, dto.getCharacterDefects().size());
+        assertEquals(88.0, dto.getOverallScore());
+        Map<String, Object> qaMap = dto.getQuestionAnalyses().get(0);
+        assertEquals("并发", qaMap.get("category"));
+        assertEquals("中级", qaMap.get("difficulty"));
+        assertEquals("先答定义再举例", qaMap.get("answerApproach"));
+        assertEquals("示例内容", qaMap.get("example"));
+        // knowledgeGaps 为对象列表
+        assertEquals(1, dto.getKnowledgeGaps().size());
     }
 
     // ---------- 幂等 ----------

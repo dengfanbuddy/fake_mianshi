@@ -62,10 +62,13 @@ public class AnalysisServiceImpl implements AnalysisService {
             1. 对自动判分的客观题（单选/多选/填空）指出答错原因与正确思路；
             2. 对未自动判分的简答题给出准确度评分和完整参考答案要点；
             3. strengths、weaknesses 各列出 2-5 条具体表现；
-            4. knowledgeGaps 必须是具体知识点（如 "JVM垃圾回收"、"Spring事务传播机制"），不要写"基础薄弱"之类的泛泛描述；
-            5. improvementPlan.topics 给出具体学习方向，suggestions 给出可执行建议。
+            4. knowledgeGaps 必须是具体知识点（如 "JVM垃圾回收"、"Spring事务传播机制"），每项要附 explanation：该知识点的核心答案要点（100-200 字），让面试者看了就能补上这块知识；
+            5. improvementPlan.topics 每项给出 {topic: 学习方向, action: 具体做法, example: 实例}，suggestions 给出可执行建议；
+            6. 根据面试表现给出 overallLevel（能力等级：初级/中级/高级/资深/专家 工程师）与 expectedSalaryRange（按国内一线城市行情给出合理月薪区间，如 "20k-30k"）；
+            7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
+            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）。
             请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
-            {"overallScore":0-100,"strengths":["..."],"weaknesses":["..."],"knowledgeGaps":["知识点..."],"improvementPlan":{"topics":["学习方向"],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0,"tone":"","improvementSuggestion":"..."}]}
+            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0,"tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一道笔试题，questionContent 请原样引用题目内容，便于程序匹配；
             - 客观题 fluency 填 0，tone 填简短语气评价或空字符串；
@@ -79,10 +82,13 @@ public class AnalysisServiceImpl implements AnalysisService {
             1. 结合对话逐题评估候选人的回答：accuracy（准确度）、depth（深度）、clarity（清晰度）、fluency（流畅度，从停顿、语气词、重复表述等推断）；
             2. communicationEvaluation 评价候选人的表达、逻辑、语气、流畅度，不超过 500 字；
             3. strengths、weaknesses 各列出 2-5 条具体表现；
-            4. knowledgeGaps 必须是具体知识点（如 "JVM垃圾回收"、"Spring事务传播机制"），不要写泛泛的描述；
-            5. improvementPlan.topics 给出具体学习方向，suggestions 给出可执行建议。
+            4. knowledgeGaps 必须是具体知识点（如 "JVM垃圾回收"、"Spring事务传播机制"），每项要附 explanation：该知识点的核心答案要点（100-200 字），让面试者看了就能补上这块知识；
+            5. improvementPlan.topics 每项给出 {topic: 学习方向, action: 具体做法, example: 实例}，suggestions 给出可执行建议；
+            6. 根据面试表现给出 overallLevel（能力等级：初级/中级/高级/资深/专家 工程师）与 expectedSalaryRange（按国内一线城市行情给出合理月薪区间，如 "20k-30k"）；
+            7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
+            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）。
             请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
-            {"overallScore":0-100,"strengths":["..."],"weaknesses":["..."],"knowledgeGaps":["知识点..."],"communicationEvaluation":"...","improvementPlan":{"topics":["学习方向"],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0-10,"tone":"","improvementSuggestion":"..."}]}
+            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"communicationEvaluation":"...","improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0-10,"tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一轮问答，questionContent 请引用面试官的原问题；
             - accuracy/depth/clarity/fluency 均按 0-10 打分。
@@ -176,7 +182,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         if (analyses.isEmpty()) {
             return;
         }
-        List<String> knowledgeGaps = parseStringList(analyses.get(0).getKnowledgeGaps());
+        List<String> knowledgeGaps = parseKnowledgePoints(analyses.get(0).getKnowledgeGaps());
         if (knowledgeGaps.isEmpty()) {
             return;
         }
@@ -223,7 +229,12 @@ public class AnalysisServiceImpl implements AnalysisService {
         dto.setOverallScore(analysis.getOverallScore());
         dto.setStrengths(parseStringList(analysis.getStrengths()));
         dto.setWeaknesses(parseStringList(analysis.getWeaknesses()));
-        dto.setKnowledgeGaps(parseStringList(analysis.getKnowledgeGaps()));
+        dto.setKnowledgeGaps(parseJsonNodeList(analysis.getKnowledgeGaps()));
+        dto.setOverallLevel(analysis.getOverallLevel());
+        dto.setExpectedSalaryRange(analysis.getExpectedSalaryRange());
+        dto.setPersonalitySummary(analysis.getPersonalitySummary());
+        dto.setCharacterTraits(parseStringList(analysis.getCharacterTraits()));
+        dto.setCharacterDefects(parseJsonNodeList(analysis.getCharacterDefects()));
         dto.setCommunicationEvaluation(analysis.getCommunicationEvaluation());
         dto.setImprovementPlan(parseMap(analysis.getImprovementPlan()));
 
@@ -238,6 +249,11 @@ public class AnalysisServiceImpl implements AnalysisService {
             map.put("clarity", qa.getClarity());
             map.put("fluency", qa.getFluency());
             map.put("tone", qa.getToneEvaluation());
+            map.put("category", qa.getCategory());
+            map.put("difficulty", qa.getDifficulty());
+            map.put("focusPoint", qa.getFocusPoint());
+            map.put("answerApproach", qa.getAnswerApproach());
+            map.put("example", qa.getExample());
             map.put("improvementSuggestion", qa.getImprovementSuggestion());
             qaMaps.add(map);
         }
@@ -354,6 +370,11 @@ public class AnalysisServiceImpl implements AnalysisService {
         analysis.setStrengths(toJsonArrayString(node.get("strengths")));
         analysis.setWeaknesses(toJsonArrayString(node.get("weaknesses")));
         analysis.setKnowledgeGaps(toJsonArrayString(node.get("knowledgeGaps")));
+        analysis.setOverallLevel(textOrNull(node, "overallLevel"));
+        analysis.setExpectedSalaryRange(textOrNull(node, "expectedSalaryRange"));
+        analysis.setPersonalitySummary(textOrNull(node, "personalitySummary"));
+        analysis.setCharacterTraits(toJsonArrayString(node.get("characterTraits")));
+        analysis.setCharacterDefects(toJsonArrayString(node.get("characterDefects")));
         analysis.setCommunicationEvaluation(textOrNull(node, "communicationEvaluation"));
         analysis.setImprovementPlan(toJsonString(node.get("improvementPlan")));
         return analysis;
@@ -383,6 +404,11 @@ public class AnalysisServiceImpl implements AnalysisService {
             qa.setClarity(numericOrNull(item, "clarity"));
             qa.setFluency(numericOrNull(item, "fluency"));
             qa.setToneEvaluation(textOrNull(item, "tone"));
+            qa.setCategory(textOrNull(item, "category"));
+            qa.setDifficulty(textOrNull(item, "difficulty"));
+            qa.setFocusPoint(textOrNull(item, "focusPoint"));
+            qa.setAnswerApproach(textOrNull(item, "answerApproach"));
+            qa.setExample(textOrNull(item, "example"));
             qa.setImprovementSuggestion(textOrNull(item, "improvementSuggestion"));
             list.add(qa);
         }
@@ -459,6 +485,32 @@ public class AnalysisServiceImpl implements AnalysisService {
         return "GOOD";
     }
 
+    /**
+     * 解析 JSON 数组字符串为 List&lt;Object&gt;（保留对象与字符串原样，供前端展示）；
+     * 解析失败返回空列表。
+     */
+    private List<Object> parseJsonNodeList(String json) {
+        List<Object> result = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode node = OBJECT_MAPPER.readTree(json);
+            if (node.isArray()) {
+                node.forEach(n -> {
+                    if (n.isTextual()) {
+                        result.add(n.asText());
+                    } else if (n.isObject()) {
+                        result.add(OBJECT_MAPPER.convertValue(n, Map.class));
+                    }
+                });
+            }
+        } catch (JacksonException ignored) {
+            // 忽略解析失败，返回空列表
+        }
+        return result;
+    }
+
     /** 解析 JSON 数组字符串为字符串列表；解析失败返回空列表 */
     private List<String> parseStringList(String json) {
         List<String> result = new ArrayList<>();
@@ -473,6 +525,37 @@ public class AnalysisServiceImpl implements AnalysisService {
                         result.add(n.asText());
                     }
                 });
+            }
+        } catch (JacksonException ignored) {
+            // 忽略解析失败，返回空列表
+        }
+        return result;
+    }
+
+    /**
+     * 从 knowledgeGaps JSON 数组中提取知识点名称，兼容两种格式：
+     * 新格式对象数组 [{"point":"JVM垃圾回收","explanation":"..."}] 取 point 字段；
+     * 旧格式纯字符串数组 ["JVM垃圾回收"] 直接取文本。
+     */
+    private List<String> parseKnowledgePoints(String json) {
+        List<String> result = new ArrayList<>();
+        if (json == null || json.isBlank()) {
+            return result;
+        }
+        try {
+            JsonNode node = OBJECT_MAPPER.readTree(json);
+            if (!node.isArray()) {
+                return result;
+            }
+            for (JsonNode n : node) {
+                if (n.isObject()) {
+                    String point = n.path("point").asText("");
+                    if (!point.isBlank()) {
+                        result.add(point.trim());
+                    }
+                } else if (n.isTextual() && !n.asText().isBlank()) {
+                    result.add(n.asText().trim());
+                }
             }
         } catch (JacksonException ignored) {
             // 忽略解析失败，返回空列表

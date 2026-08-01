@@ -47,6 +47,26 @@ public class QuestionAnalysis {
     @Column(name = "tone_evaluation")
     private String toneEvaluation;
 
+    /** 技术分类（如 JVM / 并发 / Spring / 数据库） */
+    @Column(length = 200)
+    private String category;
+
+    /** 难度（如 初级/中级/高级） */
+    @Column(length = 100)
+    private String difficulty;
+
+    /** 考察方向/能力点（该题考的是什么） */
+    @Column(name = "focus_point", length = 1000)
+    private String focusPoint;
+
+    /** 这类题的回答思路 */
+    @Column(name = "answer_approach", length = 3000)
+    private String answerApproach;
+
+    /** 优秀回答示例 */
+    @Column(length = 3000)
+    private String example;
+
     /** 改进建议 */
     @Column(name = "improvement_suggestion", length = 5000)
     private String improvementSuggestion;

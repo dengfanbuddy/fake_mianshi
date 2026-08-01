@@ -68,11 +68,38 @@ const strengths = computed(() => analysis.value?.strengths || [])
 const weaknesses = computed(() => analysis.value?.weaknesses || [])
 const knowledgeGaps = computed(() => analysis.value?.knowledgeGaps || [])
 const communicationEvaluation = computed(() => analysis.value?.communicationEvaluation || '')
+
+// 新增字段：等级 / 薪资 / 性格
+const overallLevel = computed(() => analysis.value?.overallLevel || '')
+const expectedSalaryRange = computed(() => analysis.value?.expectedSalaryRange || '')
+const personalitySummary = computed(() => analysis.value?.personalitySummary || '')
+const characterTraits = computed(() => analysis.value?.characterTraits || [])
+const characterDefects = computed(() => analysis.value?.characterDefects || [])
+
+// 知识盲区：兼容对象 {point, explanation} 与旧版纯字符串
+function gapPoint(g) {
+  return typeof g === 'object' && g !== null ? g.point || '' : g || ''
+}
+function gapExplanation(g) {
+  return typeof g === 'object' && g !== null ? g.explanation || '' : ''
+}
+
 const improvementPlan = computed(
   () => analysis.value?.improvementPlan || { topics: [], suggestions: [] }
 )
 const planTopics = computed(() => improvementPlan.value.topics || [])
 const planSuggestions = computed(() => improvementPlan.value.suggestions || [])
+
+// 改进方案 topics：兼容对象 {topic, action, example} 与旧版纯字符串
+function planTopicText(t) {
+  return typeof t === 'object' && t !== null ? t.topic || '' : t || ''
+}
+function planTopicAction(t) {
+  return typeof t === 'object' && t !== null ? t.action || '' : ''
+}
+function planTopicExample(t) {
+  return typeof t === 'object' && t !== null ? t.example || '' : ''
+}
 
 const totalCount = computed(() => writtenResults.value.length)
 const correctCount = computed(() => writtenResults.value.filter((r) => r.isCorrect === true).length)
@@ -103,6 +130,22 @@ function dimColor(v) {
 function fmt(value) {
   if (value === null || value === undefined || value === '') return '—'
   return String(value)
+}
+
+// 性格缺陷：兼容对象 {defect, improvement} 与纯字符串
+function defectText(d) {
+  return typeof d === 'object' && d !== null ? d.defect || '' : d || ''
+}
+function defectImprovement(d) {
+  return typeof d === 'object' && d !== null ? d.improvement || '' : ''
+}
+
+// 难度标签颜色
+function difficultyType(d) {
+  const t = String(d || '')
+  if (t.includes('初级')) return 'success'
+  if (t.includes('高级')) return 'danger'
+  return 'warning'
 }
 
 function formatDateTime(s) {
@@ -268,6 +311,15 @@ onMounted(fetchAll)
               <span class="meta-value">#{{ sessionId }}</span>
             </div>
 
+            <div v-if="overallLevel" class="meta-item">
+              <span class="meta-label">能力等级</span>
+              <el-tag type="warning" size="small" effect="dark">{{ overallLevel }}</el-tag>
+            </div>
+            <div v-if="expectedSalaryRange" class="meta-item">
+              <span class="meta-label">预期薪资</span>
+              <span class="meta-value salary-text">{{ expectedSalaryRange }}</span>
+            </div>
+
             <template v-if="sessionType === 'written' && totalCount">
               <div class="meta-item">
                 <span class="meta-label">笔试得分</span>
@@ -317,7 +369,30 @@ onMounted(fetchAll)
           </div>
         </section>
 
-        <!-- 3. 知识盲区 -->
+        <!-- 3. 性格总结 -->
+        <section
+          v-if="personalitySummary || characterTraits.length || characterDefects.length"
+          class="card"
+        >
+          <h3 class="card-title info-title">🧠 性格与特质总结</h3>
+          <p v-if="personalitySummary" class="para-text personality-text">{{ personalitySummary }}</p>
+          <div v-if="characterTraits.length" class="tag-list traits-tags">
+            <el-tag v-for="(t, i) in characterTraits" :key="i" type="primary" effect="plain" class="item-tag">
+              {{ t }}
+            </el-tag>
+          </div>
+          <div v-if="characterDefects.length" class="defect-list">
+            <div v-for="(d, i) in characterDefects" :key="i" class="defect-item">
+              <div class="defect-head">
+                <span class="defect-badge">缺陷 {{ i + 1 }}</span>
+                <span class="defect-name">{{ defectText(d) }}</span>
+              </div>
+              <p v-if="defectImprovement(d)" class="defect-fix">💡 改进：{{ defectImprovement(d) }}</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. 知识盲区 -->
         <section v-if="knowledgeGaps.length" class="card">
           <h3 class="card-title warn-title">
             <el-icon class="title-icon" color="#e6a23c"><WarningFilled /></el-icon>
@@ -326,18 +401,24 @@ onMounted(fetchAll)
           <ul class="gap-list">
             <li v-for="(g, i) in knowledgeGaps" :key="i" class="gap-item">
               <el-icon class="gap-icon" color="#e6a23c"><WarningFilled /></el-icon>
-              <span>{{ g }}</span>
+              <div class="gap-content">
+                <div class="gap-point">{{ gapPoint(g) }}</div>
+                <div v-if="gapExplanation(g)" class="gap-explain">
+                  <span class="gap-explain-label">核心答案要点</span>
+                  <span class="gap-explain-text">{{ gapExplanation(g) }}</span>
+                </div>
+              </div>
             </li>
           </ul>
         </section>
 
-        <!-- 4. 沟通表达（仅面试） -->
+        <!-- 5. 沟通表达（仅面试） -->
         <section v-if="sessionType === 'interview' && communicationEvaluation" class="card">
           <h3 class="card-title info-title">💬 沟通表达评价</h3>
           <p class="para-text">{{ communicationEvaluation }}</p>
         </section>
 
-        <!-- 5. 改进方案 -->
+        <!-- 6. 改进方案 -->
         <section v-if="planTopics.length || planSuggestions.length" class="card">
           <h3 class="card-title">🚀 改进方案</h3>
           <template v-if="planTopics.length">
@@ -349,7 +430,11 @@ onMounted(fetchAll)
                 :type="i % 3 === 0 ? 'primary' : i % 3 === 1 ? 'success' : 'warning'"
                 :hollow="true"
               >
-                {{ t }}
+                <div class="plan-item">
+                  <div class="plan-topic">{{ planTopicText(t) }}</div>
+                  <div v-if="planTopicAction(t)" class="plan-action">做法：{{ planTopicAction(t) }}</div>
+                  <div v-if="planTopicExample(t)" class="plan-example">实例：{{ planTopicExample(t) }}</div>
+                </div>
               </el-timeline-item>
             </el-timeline>
           </template>
@@ -364,7 +449,7 @@ onMounted(fetchAll)
           </template>
         </section>
 
-        <!-- 6. 单题分析 + 7. 笔试补充 -->
+        <!-- 7. 单题分析 + 8. 笔试补充 -->
         <section v-if="mergedQuestions.length" class="card">
           <h3 class="card-title">📝 逐题深度分析</h3>
           <el-collapse v-model="activeNames" class="qa-collapse">
@@ -375,16 +460,28 @@ onMounted(fetchAll)
                   <el-tag v-if="q.written?.isCorrect === true" type="success" size="small" effect="dark">正确</el-tag>
                   <el-tag v-else-if="q.written?.isCorrect === false" type="danger" size="small" effect="dark">错误</el-tag>
                   <el-tag v-else-if="q.analysis" type="info" size="small" effect="plain">已分析</el-tag>
-                  <span v-if="q.analysis?.questionContent" class="qa-brief">{{ q.analysis.questionContent }}</span>
+                  <el-tooltip
+                    v-if="q.analysis?.questionContent"
+                    :content="q.analysis.questionContent"
+                    placement="top"
+                    :show-after="300"
+                  >
+                    <span class="qa-brief">{{ q.analysis.questionContent }}</span>
+                  </el-tooltip>
                   <span v-else-if="q.written" class="qa-brief qa-brief-empty">（题目内容见笔试记录）</span>
                 </div>
               </template>
 
               <div class="qa-body">
-                <!-- 题干 -->
+                <!-- 题干 + 分类标签 -->
                 <div v-if="q.analysis?.questionContent" class="qa-block">
                   <span class="qa-label">题干</span>
                   <p class="qa-text">{{ q.analysis.questionContent }}</p>
+                  <div v-if="q.analysis.category || q.analysis.difficulty || q.analysis.focusPoint" class="qa-tags">
+                    <el-tag v-if="q.analysis.category" size="small" type="primary" effect="plain">{{ q.analysis.category }}</el-tag>
+                    <el-tag v-if="q.analysis.difficulty" size="small" :type="difficultyType(q.analysis.difficulty)" effect="plain">{{ q.analysis.difficulty }}</el-tag>
+                    <el-tag v-if="q.analysis.focusPoint" size="small" type="info" effect="plain">考察：{{ q.analysis.focusPoint }}</el-tag>
+                  </div>
                 </div>
 
                 <!-- 你的回答 -->
@@ -418,6 +515,18 @@ onMounted(fetchAll)
                       {{ Number(q.analysis[d.key]) || 0 }}/10
                     </span>
                   </div>
+                </div>
+
+                <!-- 回答思路 -->
+                <div v-if="q.analysis?.answerApproach" class="qa-block">
+                  <span class="qa-label">这类题的回答思路</span>
+                  <p class="qa-text approach-text">{{ q.analysis.answerApproach }}</p>
+                </div>
+
+                <!-- 优秀回答示例 -->
+                <div v-if="q.analysis?.example" class="qa-block">
+                  <span class="qa-label">优秀回答示例</span>
+                  <p class="qa-text example-text">{{ q.analysis.example }}</p>
                 </div>
 
                 <!-- 语气 / 改进建议 -->
@@ -638,6 +747,109 @@ onMounted(fetchAll)
   color: #67c23a;
   font-size: 16px;
 }
+.salary-text {
+  color: #e6a23c;
+  font-weight: 700;
+}
+
+/* ---------- 性格总结 ---------- */
+.personality-text {
+  background: #f0f9eb;
+  color: #529b2e;
+}
+.traits-tags {
+  margin-top: 12px;
+}
+.defect-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.defect-item {
+  padding: 10px 14px;
+  background: #fef0f0;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #d35050;
+  line-height: 1.6;
+}
+.defect-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.defect-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  background: #f56c6c;
+  color: #fff;
+  border-radius: 4px;
+  padding: 1px 8px;
+}
+.defect-name {
+  font-weight: 600;
+}
+.defect-fix {
+  margin: 6px 0 0;
+  color: #b88230;
+  font-size: 13px;
+}
+
+/* ---------- 知识盲区 ---------- */
+.gap-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gap-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #fdf6ec;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #8a6d3b;
+  line-height: 1.6;
+}
+.gap-icon {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.gap-content {
+  min-width: 0;
+  flex: 1;
+}
+.gap-point {
+  font-weight: 600;
+  color: #7d5a24;
+}
+.gap-explain {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #5c4a2b;
+}
+.gap-explain-label {
+  display: inline-block;
+  font-size: 11px;
+  color: #e6a23c;
+  background: #fdf0dc;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
+.gap-explain-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* ---------- 双列 ---------- */
 .grid-2 {
@@ -721,6 +933,28 @@ onMounted(fetchAll)
 .plan-timeline {
   padding-left: 4px;
 }
+.plan-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plan-topic {
+  font-weight: 600;
+  color: #303133;
+}
+.plan-action {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.6;
+}
+.plan-example {
+  font-size: 13px;
+  color: #b88230;
+  line-height: 1.6;
+  background: #fdf6ec;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
 .suggest-list {
   list-style: none;
   margin: 0;
@@ -767,6 +1001,7 @@ onMounted(fetchAll)
   gap: 8px;
   min-width: 0;
   flex: 1;
+  overflow: hidden;
 }
 .qa-no {
   flex-shrink: 0;
@@ -778,10 +1013,30 @@ onMounted(fetchAll)
   white-space: nowrap;
   color: #909399;
   font-weight: normal;
+  min-width: 0;
+  flex: 1;
 }
 .qa-brief-empty {
   color: #c0c4cc;
   font-style: italic;
+}
+.qa-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.approach-text {
+  background: #ecf5ff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #3a6ea5;
+}
+.example-text {
+  background: #f0f9eb;
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #529b2e;
 }
 .qa-body {
   padding: 8px 10px 10px;
