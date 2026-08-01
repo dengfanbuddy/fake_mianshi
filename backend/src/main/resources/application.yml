@@ -20,3 +20,9 @@ spring:
 app:
   upload-dir: ./uploads
   audio-dir: ./uploads/audio
+
+tencent:
+  cloud:
+    secret-id: ${TENCENT_SECRET_ID:}
+    secret-key: ${TENCENT_SECRET_KEY:}
+    app-id: ${TENCENT_APP_ID:}
