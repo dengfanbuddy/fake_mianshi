@@ -19,6 +19,7 @@ import com.fakemianshi.repository.MockInterviewMessageRepository;
 import com.fakemianshi.repository.WeaknessTagRepository;
 import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
+import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.LlmService;
 import com.fakemianshi.service.MockInterviewService;
 import com.fakemianshi.service.PersonaService;
@@ -27,8 +28,12 @@ import com.fakemianshi.service.ProjectService;
 import com.fakemianshi.service.QuestionGenerationService;
 import com.fakemianshi.service.ResumeService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -60,6 +65,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MockInterviewServiceImpl implements MockInterviewService {
 
+    private static final Logger log = LoggerFactory.getLogger(MockInterviewServiceImpl.class);
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /** 简历原文截断长度（无分析结果时取前 2000 字） */
@@ -83,6 +90,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final WeaknessTagRepository weaknessTagRepository;
     private final QuestionGenerationService questionGenerationService;
     private final LlmService llmService;
+    private final AnalysisService analysisService;
 
     /** 会话 -> 面试大纲（JSON），MVP 不持久化 */
     private final ConcurrentHashMap<Long, String> outlineCache = new ConcurrentHashMap<>();
@@ -206,6 +214,9 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         session.setCompletedAt(LocalDateTime.now());
         sessionRepository.save(session);
 
+        // 自动触发会话分析（在事务提交后执行，失败不阻断收尾）
+        triggerAnalysisAfterCommit(sessionId);
+
         return summaryMessage;
     }
 
@@ -231,6 +242,30 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     // ---------------- 内部方法 ----------------
+
+    /**
+     * 在事务提交后自动触发会话分析：保证分析能读取本次收尾前保存的全部对话消息。
+     * 分析失败只记录日志，不阻断面试收尾；当前无活动事务（如单元测试）时直接调用。
+     */
+    private void triggerAnalysisAfterCommit(Long sessionId) {
+        Runnable task = () -> {
+            try {
+                analysisService.analyzeSession(sessionId);
+            } catch (Exception e) {
+                log.warn("模拟面试会话分析自动触发失败: sessionId={}, cause={}", sessionId, e.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
+    }
 
     /**
      * 组装发给 LLM 的完整消息列表：system 首条 + 会话历史（CANDIDATE→user，INTERVIEWER→assistant），

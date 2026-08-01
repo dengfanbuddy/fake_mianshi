@@ -15,12 +15,17 @@ import com.fakemianshi.entity.WrittenTestQuestion;
 import com.fakemianshi.repository.InterviewSessionRepository;
 import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
+import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.ProjectService;
 import com.fakemianshi.service.QuestionGenerationService;
 import com.fakemianshi.service.WrittenTestService;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -41,6 +46,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class WrittenTestServiceImpl implements WrittenTestService {
 
+    private static final Logger log = LoggerFactory.getLogger(WrittenTestServiceImpl.class);
+
     private static final int DEFAULT_TIME_LIMIT = 60;
     private static final int DEFAULT_QUESTION_COUNT = 12;
 
@@ -56,6 +63,7 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     private final WrittenTestQuestionRepository questionRepository;
     private final WrittenTestAnswerRepository answerRepository;
     private final QuestionGenerationService questionGenerationService;
+    private final AnalysisService analysisService;
 
     @Override
     @Transactional
@@ -148,6 +156,9 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         session.setCompletedAt(LocalDateTime.now());
         sessionRepository.save(session);
 
+        // 自动触发会话分析（在事务提交后执行，失败不阻断提交）
+        triggerAnalysisAfterCommit(sessionId);
+
         WrittenTestSubmitResponse response = new WrittenTestSubmitResponse();
         response.setSessionId(sessionId);
         response.setTotalScore(totalScore);
@@ -196,6 +207,30 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         response.setResults(results);
         response.setTotalScore(normalizeScore(earned, full));
         return response;
+    }
+
+    /**
+     * 在事务提交后自动触发会话分析：保证分析能读取本次提交的全部作答数据。
+     * 分析失败只记录日志，不阻断笔试提交；当前无活动事务（如单元测试）时直接调用。
+     */
+    private void triggerAnalysisAfterCommit(Long sessionId) {
+        Runnable task = () -> {
+            try {
+                analysisService.analyzeSession(sessionId);
+            } catch (Exception e) {
+                log.warn("笔试会话分析自动触发失败: sessionId={}, cause={}", sessionId, e.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+        } else {
+            task.run();
+        }
     }
 
     /** 题型权重：单选/多选 3 分，填空 2 分，简答 5 分 */
