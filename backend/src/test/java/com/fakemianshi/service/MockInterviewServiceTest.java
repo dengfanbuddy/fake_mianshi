@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -221,6 +222,52 @@ class MockInterviewServiceTest {
         req.setUserText("回答");
 
         assertThrows(BusinessException.class, () -> service.respond(999L, req));
+    }
+
+    @Test
+    void respond_shouldParseSwitchSuggestionMarker() {
+        service.start(1L, new MockInterviewStartRequest());
+        // LLM 回复带换人建议标记
+        when(llmService.chat(anyList())).thenReturn(
+                new LlmResponse("你答得不错，但我觉得需要更严厉的追问。\n【建议换面试官:2】", "stop", 100));
+
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答内容");
+        MockInterviewRespondResponse response = service.respond(1L, req);
+
+        // 标记被剥离，只保留正常回复
+        assertEquals("你答得不错，但我觉得需要更严厉的追问。", response.getAiMessage().getContent());
+        assertEquals(2L, response.getSuggestedPersonaId());
+    }
+
+    @Test
+    void respond_shouldIgnoreSuggestionForCurrentPersona() {
+        service.start(1L, new MockInterviewStartRequest());
+        // 建议当前面试官（1L）→ 应忽略且不剥离标记内容（无意义建议）
+        when(llmService.chat(anyList())).thenReturn(
+                new LlmResponse("继续下一个问题。\n【建议换面试官:1】", "stop", 100));
+
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答内容");
+        MockInterviewRespondResponse response = service.respond(1L, req);
+
+        assertNull(response.getSuggestedPersonaId());
+        assertEquals("继续下一个问题。", response.getAiMessage().getContent());
+    }
+
+    @Test
+    void respond_shouldIgnoreSuggestionWhenPersonaNotFound() {
+        service.start(1L, new MockInterviewStartRequest());
+        // 建议一个不存在的 ID → 忽略
+        when(llmService.chat(anyList())).thenReturn(
+                new LlmResponse("继续。\n【建议换面试官:999】", "stop", 100));
+
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答内容");
+        MockInterviewRespondResponse response = service.respond(1L, req);
+
+        assertNull(response.getSuggestedPersonaId());
+        assertEquals("继续。", response.getAiMessage().getContent());
     }
 
     @Test

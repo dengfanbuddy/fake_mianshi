@@ -14,4 +14,7 @@ public class MockInterviewRespondResponse {
 
     /** 面试官 AI 回复消息（已保存） */
     private MockInterviewMessage aiMessage;
+
+    /** 面试官建议切换的目标面试官 ID（由 LLM 依据回答情况建议，可为 null） */
+    private Long suggestedPersonaId;
 }

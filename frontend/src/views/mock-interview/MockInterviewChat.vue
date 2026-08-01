@@ -249,6 +249,9 @@ async function doSend(text) {
     } else if (autoTts.value) {
       speak(aiContent)
     }
+
+    // 面试官建议换人：根据回答情况推荐更合适的风格，弹窗由候选人确认
+    handleSwitchSuggestion(data.suggestedPersonaId)
   } catch {
     // 失败：把文本放回输入框，方便重发
     messages.value = messages.value.filter((m) => m !== optimistic)
@@ -331,6 +334,42 @@ async function confirmSwitch() {
     })
     ElMessage.success('面试官已切换')
     switchDialogVisible.value = false
+  } catch {
+    // 拦截器已提示
+  } finally {
+    switching.value = false
+  }
+}
+
+// ---------- 面试官自动建议换人（AI 依据回答情况推荐，候选人确认后切换） ----------
+async function handleSwitchSuggestion(suggestedPersonaId) {
+  if (!suggestedPersonaId || switching.value || ended.value) return
+  const p = personas.value.find((x) => x.id === suggestedPersonaId)
+  if (!p || p.id === currentPersonaId.value) return
+  try {
+    await ElMessageBox.confirm(
+      `面试官根据你的回答情况，建议切换为【${p.name}】风格继续面试，是否切换？`,
+      '面试官建议换人',
+      {
+        confirmButtonText: '切换',
+        cancelButtonText: '暂不',
+        type: 'info',
+      }
+    )
+  } catch {
+    return // 用户暂不切换
+  }
+  switching.value = true
+  try {
+    await switchPersona(sessionId.value, p.id)
+    personaName.value = p.name
+    messages.value.push({
+      id: null,
+      role: 'SYSTEM',
+      content: `面试官已切换为【${p.name}】`,
+      createdAt: new Date(),
+    })
+    ElMessage.success('已按建议切换面试官')
   } catch {
     // 拦截器已提示
   } finally {

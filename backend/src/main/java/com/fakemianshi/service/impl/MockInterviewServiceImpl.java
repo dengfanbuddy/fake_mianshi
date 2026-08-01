@@ -77,6 +77,10 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private static final String STATUS_IN_PROGRESS = "IN_PROGRESS";
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String TYPE_MOCK = "MOCK";
+
+    /** 面试官换人建议标记：【建议换面试官:ID】 */
+    private static final java.util.regex.Pattern SWITCH_SUGGESTION_PATTERN =
+            java.util.regex.Pattern.compile("【建议换面试官[:：]\\s*(\\d+)】");
     private static final String TYPE_WRITTEN = "WRITTEN";
 
     private final ProjectService projectService;
@@ -169,20 +173,61 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
 
         LlmResponse llmResponse = llmService.chat(messages);
-        String replyContent = llmResponse.getContent() == null ? "" : llmResponse.getContent();
+        StringBuilder replyBuilder = new StringBuilder(llmResponse.getContent() == null ? "" : llmResponse.getContent());
+
+        // 5.1 解析"建议换面试官"标记：【建议换面试官:ID】，剥离标记并校验
+        Long suggestedPersonaId = parseAndStripSwitchSuggestion(replyBuilder, persona);
+        String cleanReply = replyBuilder.toString().trim();
 
         // 5. 保存面试官消息
         MockInterviewMessage aiMessage = new MockInterviewMessage();
         aiMessage.setSessionId(sessionId);
         aiMessage.setRole(ROLE_INTERVIEWER);
-        aiMessage.setContent(replyContent);
+        aiMessage.setContent(cleanReply);
         aiMessage.setPersonaId(persona.getId());
         messageRepository.save(aiMessage);
 
         MockInterviewRespondResponse response = new MockInterviewRespondResponse();
         response.setUserMessage(userMessage);
         response.setAiMessage(aiMessage);
+        response.setSuggestedPersonaId(suggestedPersonaId);
         return response;
+    }
+
+    /**
+     * 解析面试官回复中的换人建议标记「【建议换面试官:ID】」：
+     * 命中时先剥离标记（无论是否采纳都不展示给候选人），
+     * 再校验 ID 合法且不是当前面试官，满足才返回目标 ID，否则返回 null。
+     */
+    private Long parseAndStripSwitchSuggestion(StringBuilder content, InterviewerPersona currentPersona) {
+        java.util.regex.Matcher matcher = SWITCH_SUGGESTION_PATTERN.matcher(content);
+        if (!matcher.find()) {
+            return null;
+        }
+        // 先取出 ID 与标记文本（matcher 引用可变 StringBuilder，修改内容后 group() 索引会失效，必须提前取值）
+        String idText = matcher.group(1);
+        String marker = matcher.group();
+        // 剥离标记（无论是否采纳都不展示给候选人）
+        int start = content.indexOf(marker);
+        if (start >= 0) {
+            content.replace(start, start + marker.length(), "");
+        }
+        // 校验 ID
+        long suggestedId;
+        try {
+            suggestedId = Long.parseLong(idText.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        if (currentPersona != null && currentPersona.getId() != null
+                && currentPersona.getId().longValue() == suggestedId) {
+            return null; // 建议当前面试官无意义
+        }
+        try {
+            return personaService.findById(suggestedId).getId();
+        } catch (Exception e) {
+            return null; // ID 不存在，忽略
+        }
     }
 
     @Override
@@ -321,12 +366,16 @@ public class MockInterviewServiceImpl implements MockInterviewService {
 
                 %s
 
+                【可切换的面试官风格（ID:名称-描述）】
+                %s
+
                 【对话规则】
                 1. 面试问题必须在面试过程中实时生成，根据候选人上一条回答动态决定下一步：可追问深挖、转换话题，或在纠正错误后继续，不要提前把所有问题一次抛出；
                 2. 当候选人回答错误或含糊不清时，必须追问澄清或给出提示后再继续，不要直接跳过；
                 3. 面试不设固定时限，由面试官根据题量与对话轮数自然收尾；当大纲主题已覆盖或对话轮数足够时，自然结束面试并给出简短总结，同时明确告诉候选人面试结束，收尾消息必须以“【面试结束】”开头；
                 4. 每一轮只提出一个问题或一段追问，不要一次抛出多个问题；
-                5. 始终保持本面试官的风格（用词、语气、追问策略），不要偏离身份。
+                5. 始终保持本面试官的风格（用词、语气、追问策略），不要偏离身份；
+                6. 若发现当前面试官风格不再适合候选人（例如候选人过度紧张、需要更温和的引导；或回答过浅、需要更严厉的深挖），可以在回复末尾附加一行“【建议换面试官:ID】”，ID 必须来自【可切换的面试官风格】列表且不等于当前面试官；一般情况下不要建议，也不要连续多轮建议；该标记不会展示给候选人。
 
                 现在，请结合以上信息与对话历史，继续本次面试。
                 """.formatted(
@@ -336,7 +385,27 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 outline == null ? "（无）" : outline,
                 buildResumeText(resume),
                 buildWeaknessText(tags),
-                writtenSection);
+                writtenSection,
+                buildPersonaListText(persona));
+    }
+
+    /** 构建可切换面试官列表文本（不含当前面试官），供 LLM 换人建议使用 */
+    private String buildPersonaListText(InterviewerPersona currentPersona) {
+        List<InterviewerPersona> all = personaService.findAll();
+        if (all == null || all.isEmpty()) {
+            return "（无）";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (InterviewerPersona p : all) {
+            if (currentPersona != null && currentPersona.getId() != null
+                    && currentPersona.getId().equals(p.getId())) {
+                continue;
+            }
+            if (sb.length() > 0) sb.append("\n");
+            sb.append(p.getId()).append(":").append(p.getName() == null ? "-" : p.getName())
+                    .append("-").append(p.getDescription() == null ? "" : p.getDescription());
+        }
+        return sb.length() == 0 ? "（无）" : sb.toString();
     }
 
     /**
