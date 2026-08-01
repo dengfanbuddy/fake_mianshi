@@ -12,6 +12,7 @@ import {
   getPersonaList,
 } from '../../api/mock-interview'
 import { recognizeSpeech, synthesizeSpeech } from '../../api/voice'
+import { blobToWav } from '../../utils/audio'
 
 const route = useRoute()
 const router = useRouter()
@@ -200,7 +201,9 @@ async function handleRecorded(blob) {
   if (sending.value || recognizing.value || ended.value) return
   recognizing.value = true
   try {
-    const res = await recognizeSpeech(blob)
+    // 浏览器录制多为 webm，转 wav 后上传（腾讯云 ASR 对 wav 支持最稳）
+    const wavBlob = await blobToWav(blob)
+    const res = await recognizeSpeech(wavBlob)
     recognizing.value = false
     const text = (res?.data || '').trim()
     if (!text) {
@@ -208,9 +211,9 @@ async function handleRecorded(blob) {
       return
     }
     doSend(text)
-  } catch {
+  } catch (e) {
     recognizing.value = false
-    ElMessage.error('语音识别失败，请改用文字输入')
+    ElMessage.error(`语音识别失败：${e.message || '未知错误'}，请改用文字输入`)
   }
 }
 
