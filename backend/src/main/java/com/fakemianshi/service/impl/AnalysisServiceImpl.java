@@ -297,7 +297,7 @@ public class AnalysisServiceImpl implements AnalysisService {
 
     /** 调用 LLM 并将返回内容提取、解析为 JSON 对象，带分层容错；分析报告输出较长，使用大 max_tokens */
     private JsonNode callLlm(String systemPrompt, String userPrompt) {
-        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.ANALYSIS_MAX_TOKENS);
+        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
         String raw = response.getContent();
         String json = JsonExtractor.extractJsonObject(raw);
         try {

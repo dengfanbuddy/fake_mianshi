@@ -34,11 +34,14 @@ public class LlmServiceImpl implements LlmService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    /** 默认输出 token 上限（普通对话/出题） */
+    /** 默认输出 token 上限（普通对话/开场白等短输出） */
     public static final int DEFAULT_MAX_TOKENS = 4096;
 
-    /** 长文本分析任务（分析报告）输出 token 上限 */
-    public static final int ANALYSIS_MAX_TOKENS = 8192;
+    /**
+     * 长文本任务（笔试出题、分析报告）输出 token 上限。
+     * DeepSeek 模型输出能力最大 384K，64K 对出题/分析报告绰绰有余且不接近 API 限制。
+     */
+    public static final int LONG_TASK_MAX_TOKENS = 65536;
 
     private final AIModelConfigRepository configRepository;
     private final HttpClient httpClient;

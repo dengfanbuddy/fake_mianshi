@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -89,7 +90,7 @@ class QuestionGenerationServiceTest {
     @Test
     void generateWrittenTestQuestions_shouldParseAndSaveAllQuestions() {
         stubContext();
-        when(llmService.chat(anyString(), anyString()))
+        when(llmService.chat(anyString(), anyString(), anyInt()))
                 .thenReturn(new LlmResponse(QUESTIONS_JSON, "stop", 100));
 
         List<WrittenTestQuestion> questions = service.generateWrittenTestQuestions(10L, 1L, 4);
@@ -122,7 +123,7 @@ class QuestionGenerationServiceTest {
     void generateWrittenTestQuestions_shouldHandleMarkdownFence() {
         stubContext();
         String fenced = "以下是生成结果：\n```json\n" + QUESTIONS_JSON + "\n```\n请查收";
-        when(llmService.chat(anyString(), anyString()))
+        when(llmService.chat(anyString(), anyString(), anyInt()))
                 .thenReturn(new LlmResponse(fenced, "stop", 100));
 
         List<WrittenTestQuestion> questions = service.generateWrittenTestQuestions(10L, 1L, 4);
@@ -135,7 +136,7 @@ class QuestionGenerationServiceTest {
     @Test
     void generateWrittenTestQuestions_shouldThrowBusinessException_whenJsonInvalid() {
         stubContext();
-        when(llmService.chat(anyString(), anyString()))
+        when(llmService.chat(anyString(), anyString(), anyInt()))
                 .thenReturn(new LlmResponse("这不是 JSON", "stop", 10));
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -148,7 +149,7 @@ class QuestionGenerationServiceTest {
     @Test
     void generateWrittenTestQuestions_shouldThrowBusinessException_whenNotArray() {
         stubContext();
-        when(llmService.chat(anyString(), anyString()))
+        when(llmService.chat(anyString(), anyString(), anyInt()))
                 .thenReturn(new LlmResponse("{\"items\":[]}", "stop", 10));
 
         assertThrows(BusinessException.class,

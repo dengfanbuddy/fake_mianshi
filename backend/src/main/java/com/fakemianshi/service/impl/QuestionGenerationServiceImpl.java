@@ -11,6 +11,7 @@ import com.fakemianshi.repository.InterviewerPersonaRepository;
 import com.fakemianshi.repository.WeaknessTagRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.LlmService;
+import com.fakemianshi.service.impl.LlmServiceImpl;
 import com.fakemianshi.service.PositionRequirementService;
 import com.fakemianshi.service.QuestionGenerationService;
 import com.fakemianshi.service.ResumeService;
@@ -64,7 +65,7 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
                 """.formatted(questionCount);
 
         String userPrompt = buildContext(projectId);
-        LlmResponse response = llmService.chat(systemPrompt, userPrompt);
+        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
         List<JsonNode> items = parseQuestionArray(response.getContent());
 
         List<WrittenTestQuestion> questions = new ArrayList<>();
