@@ -14,6 +14,7 @@ const configs = ref([])
 const configLoading = ref(false)
 const configDialogVisible = ref(false)
 const savingConfig = ref(false)
+const editingConfigId = ref(null)
 const configForm = ref({ provider: '', apiUrl: '', apiKey: '', modelName: '', isActive: true })
 
 async function fetchConfigs() {
@@ -30,7 +31,20 @@ async function fetchConfigs() {
 }
 
 function openConfigDialog() {
+  editingConfigId.value = null
   configForm.value = { provider: '', apiUrl: '', apiKey: '', modelName: '', isActive: true }
+  configDialogVisible.value = true
+}
+
+function openEditConfig(row) {
+  editingConfigId.value = row.id
+  configForm.value = {
+    provider: row.provider || '',
+    apiUrl: row.apiUrl || '',
+    apiKey: row.apiKey || '',
+    modelName: row.modelName || '',
+    isActive: !!row.isActive,
+  }
   configDialogVisible.value = true
 }
 
@@ -41,15 +55,18 @@ async function handleSaveConfig() {
   }
   savingConfig.value = true
   try {
-    const res = await saveAiConfig({
+    const payload = {
       provider: configForm.value.provider.trim(),
       apiUrl: configForm.value.apiUrl.trim(),
       apiKey: configForm.value.apiKey.trim(),
       modelName: configForm.value.modelName.trim(),
       isActive: configForm.value.isActive,
-    })
+    }
+    // 编辑时带 id，后端 POST /ai-config 会按 JPA save 语义更新该行
+    if (editingConfigId.value) payload.id = editingConfigId.value
+    const res = await saveAiConfig(payload)
     if (res.code === 200) {
-      ElMessage.success('AI 配置保存成功')
+      ElMessage.success(editingConfigId.value ? 'AI 配置已更新' : 'AI 配置保存成功')
       configDialogVisible.value = false
       await fetchConfigs()
     } else {
@@ -199,11 +216,17 @@ onMounted(() => {
             <el-tag v-else type="info" size="small" effect="plain">未启用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button
-              v-if="!row.isActive"
               type="primary"
+              size="small"
+              text
+              @click="openEditConfig(row)"
+            >编辑</el-button>
+            <el-button
+              v-if="!row.isActive"
+              type="warning"
               size="small"
               text
               @click="handleSetActive(row)"
@@ -272,14 +295,18 @@ onMounted(() => {
       </el-table>
     </el-card>
 
-    <!-- AI 配置新增弹窗 -->
-    <el-dialog v-model="configDialogVisible" title="新增 AI 模型配置" width="520px">
+    <!-- AI 配置新增/编辑弹窗 -->
+    <el-dialog
+      v-model="configDialogVisible"
+      :title="editingConfigId ? '编辑 AI 模型配置' : '新增 AI 模型配置'"
+      width="520px"
+    >
       <el-form label-width="90px">
         <el-form-item label="Provider" required>
           <el-input v-model="configForm.provider" placeholder="例如：deepseek / openai / qwen" />
         </el-form-item>
         <el-form-item label="API 地址" required>
-          <el-input v-model="configForm.apiUrl" placeholder="例如：https://api.deepseek.com" />
+          <el-input v-model="configForm.apiUrl" placeholder="OpenAI 兼容端点，例如：https://api.deepseek.com/v1/chat/completions" />
         </el-form-item>
         <el-form-item label="API Key">
           <el-input v-model="configForm.apiKey" type="password" show-password placeholder="可留空（本地配置时填）" />

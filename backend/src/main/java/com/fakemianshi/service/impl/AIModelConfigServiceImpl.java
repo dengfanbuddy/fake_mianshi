@@ -34,6 +34,11 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
         if (config.getIsActive() == null) {
             config.setIsActive(false);
         }
+        // 编辑场景（带 id）：保留服务端管理的 createdAt，避免 JPA merge 将其覆盖为 null
+        if (config.getId() != null) {
+            repository.findById(config.getId()).ifPresent(existing ->
+                    config.setCreatedAt(existing.getCreatedAt()));
+        }
         if (Boolean.TRUE.equals(config.getIsActive())) {
             deactivateOthers(config.getId());
         }

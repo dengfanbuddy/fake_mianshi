@@ -125,6 +125,32 @@ class AIModelConfigServiceTest {
     }
 
     @Test
+    void save_shouldPreserveCreatedAt_whenEditingExistingConfig() {
+        // 已存在的配置，createdAt 由服务端管理
+        AIModelConfig existing = new AIModelConfig();
+        existing.setId(1L);
+        existing.setIsActive(true);
+        existing.setCreatedAt(java.time.LocalDateTime.of(2026, 8, 1, 10, 0));
+
+        // 编辑请求：带 id，但不带 createdAt（前端不会传）
+        AIModelConfig editRequest = new AIModelConfig();
+        editRequest.setId(1L);
+        editRequest.setProvider("deepseek");
+        editRequest.setApiUrl("https://api.deepseek.com/v1/chat/completions");
+        editRequest.setApiKey("sk-xxx");
+        editRequest.setModelName("deepseek-chat");
+        editRequest.setIsActive(true);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(existing));
+        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(existing)));
+
+        AIModelConfig saved = service.save(editRequest);
+
+        assertEquals(existing.getCreatedAt(), saved.getCreatedAt(),
+                "编辑时 createdAt 应保留原值，不能被 null 覆盖");
+    }
+
+    @Test
     void findAll_shouldReturnAllConfigs() {
         AIModelConfig c1 = new AIModelConfig();
         c1.setId(1L);
