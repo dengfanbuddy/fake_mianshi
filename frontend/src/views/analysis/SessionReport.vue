@@ -8,6 +8,7 @@ import {
   refreshSessionAnalysis,
   probeWrittenTestDetail,
 } from '../../api/analysis'
+import { getSessionInfo } from '../../api/session'
 import { WarningFilled, ChatDotRound, ArrowLeft, Refresh } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -230,6 +231,18 @@ async function fetchAll() {
     }
   } catch (e) {
     // 拦截器已提示
+  }
+
+  // 未带 projectId 时，从会话信息获取所属项目（保证返回能回到项目页）
+  if (!projectId.value) {
+    try {
+      const sres = await getSessionInfo(sessionId)
+      if (sres.code === 200 && sres.data?.projectId) {
+        projectId.value = sres.data.projectId
+      }
+    } catch (e) {
+      // 忽略，返回按钮会回首页
+    }
   }
 
   // 判定会话类型：笔试有记录；模拟面试后端返回 404（静默探测，不弹错误提示）

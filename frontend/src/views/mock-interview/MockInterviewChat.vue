@@ -269,7 +269,7 @@ async function handleInterviewEnded() {
       cancelButtonText: '留在本页',
       type: 'success',
     })
-    router.push(`/analysis/session/${sessionId.value}`)
+    router.push({ path: `/analysis/session/${sessionId.value}`, query: { projectId: projectId.value } })
   } catch {
     // 用户选择留在本页
   }
@@ -298,7 +298,7 @@ async function endInterview() {
       await ElMessageBox.alert('面试总结已生成，点击查看面试分析。', '面试完成', {
         confirmButtonText: '查看分析',
       })
-      router.push(`/analysis/session/${sessionId.value}`)
+      router.push({ path: `/analysis/session/${sessionId.value}`, query: { projectId: projectId.value } })
     } catch {
       // 用户关闭弹窗，留在本页
     }

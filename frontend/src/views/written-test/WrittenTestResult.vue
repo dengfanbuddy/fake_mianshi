@@ -66,7 +66,7 @@ function goBackProject() {
 }
 
 function goAnalysis() {
-  router.push(`/analysis/session/${sessionId}`)
+  router.push({ path: `/analysis/session/${sessionId}`, query: { projectId } })
 }
 
 onMounted(fetchDetail)

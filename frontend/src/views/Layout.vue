@@ -4,9 +4,20 @@ import { useRoute } from 'vue-router'
 
 const route = useRoute()
 
-// 根据当前路由路径决定侧边栏激活项
+// 根据当前路由路径决定侧边栏激活项：业务页（项目/笔试/面试/分析）统一归属"项目管理"
 const activeMenu = computed(() => {
-  if (route.path.startsWith('/settings')) return '/settings'
+  const p = route.path
+  if (p.startsWith('/settings')) return '/settings'
+  if (p.startsWith('/help') || p.startsWith('/docs')) return '/help'
+  if (
+    p.startsWith('/projects') ||
+    p.startsWith('/project') ||
+    p.startsWith('/analysis') ||
+    p.startsWith('/written-test') ||
+    p.startsWith('/mock-interview')
+  ) {
+    return '/projects'
+  }
   return '/'
 })
 </script>
@@ -27,14 +38,23 @@ const activeMenu = computed(() => {
         active-text-color="#ffffff"
       >
         <el-menu-item index="/">
-          <span class="menu-icon">🏠</span>
-          <span>首页</span>
+          <span class="menu-icon">📊</span>
+          <span>看板</span>
+        </el-menu-item>
+        <el-menu-item index="/projects">
+          <span class="menu-icon">📁</span>
+          <span>项目管理</span>
         </el-menu-item>
         <el-menu-item index="/settings">
           <span class="menu-icon">⚙️</span>
           <span>设置</span>
         </el-menu-item>
+        <el-menu-item index="/help">
+          <span class="menu-icon">❓</span>
+          <span>使用说明</span>
+        </el-menu-item>
       </el-menu>
+      <div class="aside-footer">v1.0.0</div>
     </el-aside>
 
     <el-main class="main">
@@ -45,16 +65,19 @@ const activeMenu = computed(() => {
 
 <style scoped>
 .layout {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 .aside {
   background: #001529;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 .brand {
   padding: 24px 20px 16px;
   color: #fff;
+  flex-shrink: 0;
 }
 .brand-name {
   font-size: 22px;
@@ -73,9 +96,16 @@ const activeMenu = computed(() => {
 .menu-icon {
   margin-right: 6px;
 }
+.aside-footer {
+  flex-shrink: 0;
+  padding: 16px 20px;
+  font-size: 12px;
+  color: #4a5568;
+}
 .main {
   background: #f5f7fa;
   padding: 24px;
   overflow-y: auto;
+  height: 100vh;
 }
 </style>

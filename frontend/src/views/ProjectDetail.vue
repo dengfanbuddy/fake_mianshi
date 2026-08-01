@@ -329,7 +329,7 @@ async function fetchSessions() {
 }
 
 function viewReport(sessionId) {
-  router.push(`/analysis/session/${sessionId}`)
+  router.push({ path: `/analysis/session/${sessionId}`, query: { projectId } })
 }
 
 /* ---------------- 弱点标签 ---------------- */
