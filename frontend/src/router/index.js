@@ -21,6 +21,16 @@ const routes = [
     name: 'MockInterviewChat',
     component: () => import('../views/mock-interview/MockInterviewChat.vue'),
   },
+  {
+    path: '/analysis/session/:sessionId',
+    name: 'SessionReport',
+    component: () => import('../views/analysis/SessionReport.vue'),
+  },
+  {
+    path: '/analysis/history/:projectId',
+    name: 'HistoryReport',
+    component: () => import('../views/analysis/HistoryReport.vue'),
+  },
 ]
 
 const router = createRouter({
