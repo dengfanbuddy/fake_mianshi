@@ -74,16 +74,16 @@ public class VoiceServiceImpl implements VoiceService {
     public String recognizeSpeech(byte[] audioData) {
         validateConfigured();
         try {
+            // 注意：Action/Version/Region 为公共参数，通过 X-TC-* 请求头传递（见 doPost），
+            // 不能放进 JSON body——腾讯云新版接口会对 body 中的公共参数字段做严格校验。
             ObjectNode root = OBJECT_MAPPER.createObjectNode();
-            root.put("Action", "SentenceRecognition");
-            root.put("Version", ASR_VERSION);
-            root.put("Region", properties.getRegion());
             root.put("ProjectId", 0);
             root.put("SubServiceType", 2);
             root.put("EngSerViceType", "16k_zh");
             root.put("SourceType", 1);
             root.put("VoiceFormat", "wav");
             root.put("Data", Base64.getEncoder().encodeToString(audioData));
+            root.put("DataLen", audioData.length);
             String payload = OBJECT_MAPPER.writeValueAsString(root);
 
             String responseBody = doPost(properties.getAsrUrl(), ASR_SERVICE, "SentenceRecognition", ASR_VERSION, payload);
@@ -103,9 +103,8 @@ public class VoiceServiceImpl implements VoiceService {
     public byte[] synthesizeSpeech(String text, String voiceType) {
         validateConfigured();
         try {
+            // Action/Version/Region 为公共参数，经 X-TC-* 请求头传递（见 doPost），不放入 body
             ObjectNode root = OBJECT_MAPPER.createObjectNode();
-            root.put("Action", "TextToVoice");
-            root.put("Version", TTS_VERSION);
             root.put("Text", text);
             root.put("SessionId", UUID.randomUUID().toString());
             root.put("ModelType", 1);
