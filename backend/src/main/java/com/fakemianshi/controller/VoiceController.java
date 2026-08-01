@@ -49,6 +49,7 @@ public class VoiceController {
     }
 
     /** 语音识别（STT）：上传音频，返回识别文本 */
+    @PostMapping("/stt")
     public ApiResponse<String> stt(@RequestParam("file") MultipartFile file) {
         byte[] audioData;
         try {

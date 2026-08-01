@@ -84,26 +84,26 @@ class VoiceServiceTest {
     }
 
     @Test
-    void mapVoiceType_shouldMapSeriousAndSternTo101004() {
+    void mapVoiceType_shouldMapSeriousTo1004AndSternTo1010() {
         VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("101004", service.mapVoiceType("{\"tone\":\"serious\"}"));
-        assertEquals("101004", service.mapVoiceType("{\"tone\":\"stern\"}"));
+        assertEquals("1004", service.mapVoiceType("{\"tone\":\"serious\"}"));
+        assertEquals("1010", service.mapVoiceType("{\"tone\":\"stern\"}"));
     }
 
     @Test
-    void mapVoiceType_shouldMapWarmTo101002() {
+    void mapVoiceType_shouldMapWarmTo1002() {
         VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("101002", service.mapVoiceType("{\"tone\":\"warm\"}"));
+        assertEquals("1002", service.mapVoiceType("{\"tone\":\"warm\"}"));
     }
 
     @Test
-    void mapVoiceType_shouldDefaultTo101001() {
+    void mapVoiceType_shouldDefaultTo1004() {
         VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("101001", service.mapVoiceType("{\"tone\":\"neutral\"}"));
-        assertEquals("101001", service.mapVoiceType("{\"tone\":\"professional\"}"));
-        assertEquals("101001", service.mapVoiceType("not valid json"));
-        assertEquals("101001", service.mapVoiceType(""));
-        assertEquals("101001", service.mapVoiceType(null));
+        assertEquals("1004", service.mapVoiceType("{\"tone\":\"neutral\"}"));
+        assertEquals("1004", service.mapVoiceType("{\"tone\":\"professional\"}"));
+        assertEquals("1004", service.mapVoiceType("not valid json"));
+        assertEquals("1004", service.mapVoiceType(""));
+        assertEquals("1004", service.mapVoiceType(null));
     }
 
     @Test

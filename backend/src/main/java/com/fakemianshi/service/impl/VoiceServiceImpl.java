@@ -41,12 +41,13 @@ public class VoiceServiceImpl implements VoiceService {
 
     private static final String ALGORITHM = "TC3-HMAC-SHA256";
     private static final String ASR_VERSION = "2019-06-14";
-    private static final String TTS_VERSION = "2018-08-01";
+    /** TTS 基础语音合成接口版本（2019-08-23；旧版 2018-08-01 已停用） */
+    private static final String TTS_VERSION = "2019-08-23";
     private static final String ASR_SERVICE = "asr";
     private static final String TTS_SERVICE = "tts";
 
-    /** 默认音色：101001 标准男声 */
-    public static final String DEFAULT_VOICE_TYPE = "101001";
+    /** 默认音色：1004 智云（标准男声） */
+    public static final String DEFAULT_VOICE_TYPE = "1004";
 
     private final TencentCloudProperties properties;
     private final HttpClient httpClient;
@@ -134,10 +135,11 @@ public class VoiceServiceImpl implements VoiceService {
     }
 
     /**
-     * 根据面试官风格配置（JSON）映射腾讯云 TTS 音色编号。
+     * 根据面试官风格配置（JSON）映射腾讯云 TTS 音色编号（新版 2019-08-23 音色 ID）。
      *
-     * <p>从 styleConfig 中解析 tone 字段：serious/stern → 101004（情感男声）、
-     * warm → 101002（亲切女声）、neutral → 101001（标准男声），解析失败或未知 tone 默认 101001。
+     * <p>从 styleConfig 中解析 tone 字段：serious → 1004（智云·男声）、
+     * stern → 1010（智华·成熟男声）、warm → 1002（智聆·亲切女声）、
+     * neutral/未知 → 1004（智云·标准男声）。
      *
      * @param personaStyleConfig 人设风格配置 JSON 字符串
      * @return 腾讯云 VoiceType 数值字符串
@@ -150,8 +152,9 @@ public class VoiceServiceImpl implements VoiceService {
             JsonNode node = OBJECT_MAPPER.readTree(personaStyleConfig);
             String tone = node.path("tone").asText("").trim().toLowerCase();
             return switch (tone) {
-                case "serious", "stern" -> "101004";
-                case "warm" -> "101002";
+                case "serious" -> "1004";
+                case "stern" -> "1010";
+                case "warm" -> "1002";
                 case "neutral" -> DEFAULT_VOICE_TYPE;
                 default -> DEFAULT_VOICE_TYPE;
             };
