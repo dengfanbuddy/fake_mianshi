@@ -391,26 +391,43 @@ async function speak(text) {
   stopCurrentAudio()
   const cleanText = ttsText(text)
   if (!cleanText) return
+  let blob
   try {
-    const blob = await synthesizeSpeech(cleanText, currentPersonaStyle.value)
-    if (!blob || blob.size === 0) {
-      ElMessage.error('语音合成失败：音频为空')
-      return
-    }
-    const url = URL.createObjectURL(blob)
-    const audio = new Audio(url)
-    currentAudio = audio
-    audio.onended = () => {
-      URL.revokeObjectURL(url)
-      if (currentAudio === audio) currentAudio = null
-    }
-    audio.onerror = () => {
-      URL.revokeObjectURL(url)
-      ElMessage.error('语音播放失败')
-    }
+    blob = await synthesizeSpeech(cleanText, currentPersonaStyle.value)
+  } catch (e) {
+    // 合成请求失败（网络 / 后端错误）
+    const msg = e?.response?.data?.message || e?.message || '未知错误'
+    ElMessage.error(`语音合成失败：${msg}`)
+    return
+  }
+  if (!blob || blob.size === 0) {
+    ElMessage.error('语音合成失败：音频为空')
+    return
+  }
+  const url = URL.createObjectURL(blob)
+  const audio = new Audio(url)
+  currentAudio = audio
+  audio.onended = () => {
+    URL.revokeObjectURL(url)
+    if (currentAudio === audio) currentAudio = null
+  }
+  audio.onerror = () => {
+    URL.revokeObjectURL(url)
+    if (currentAudio === audio) currentAudio = null
+    ElMessage.error('语音播放失败：音频格式可能不受支持')
+  }
+  try {
     await audio.play()
-  } catch {
-    ElMessage.error('语音合成失败，请稍后重试')
+  } catch (e) {
+    // 浏览器自动播放策略拦截：用户点击页面后可恢复播放
+    URL.revokeObjectURL(url)
+    if (currentAudio === audio) currentAudio = null
+    const isAutoplayBlocked = e?.name === 'NotAllowedError' || /autoplay|interactive/i.test(e?.message || '')
+    if (isAutoplayBlocked) {
+      ElMessage.warning('浏览器拦截了自动朗读，请点击一下页面任意位置后重试')
+    } else {
+      ElMessage.error(`语音播放失败：${e?.message || '未知错误'}`)
+    }
   }
 }
 
