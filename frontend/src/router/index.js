@@ -16,6 +16,11 @@ const routes = [
     name: 'WrittenTestResult',
     component: () => import('../views/written-test/WrittenTestResult.vue'),
   },
+  {
+    path: '/mock-interview/:projectId?',
+    name: 'MockInterviewChat',
+    component: () => import('../views/mock-interview/MockInterviewChat.vue'),
+  },
 ]
 
 const router = createRouter({
