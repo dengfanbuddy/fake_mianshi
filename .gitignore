@@ -9,3 +9,6 @@ uploads/
 data/
 .idea/
 .vscode/
+test_silence.wav
+backend-run.log
+backend-run-err.log
