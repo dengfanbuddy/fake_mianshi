@@ -34,6 +34,12 @@ public class LlmServiceImpl implements LlmService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
+    /** 默认输出 token 上限（普通对话/出题） */
+    public static final int DEFAULT_MAX_TOKENS = 4096;
+
+    /** 长文本分析任务（分析报告）输出 token 上限 */
+    public static final int ANALYSIS_MAX_TOKENS = 8192;
+
     private final AIModelConfigRepository configRepository;
     private final HttpClient httpClient;
 
@@ -66,13 +72,28 @@ public class LlmServiceImpl implements LlmService {
     }
 
     @Override
+    public LlmResponse chat(String systemPrompt, String userPrompt, int maxTokens) {
+        List<Message> messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            messages.add(new Message("system", systemPrompt));
+        }
+        messages.add(new Message("user", userPrompt));
+        return chat(messages, maxTokens);
+    }
+
+    @Override
     public LlmResponse chat(List<Message> messages) {
+        return chat(messages, DEFAULT_MAX_TOKENS);
+    }
+
+    @Override
+    public LlmResponse chat(List<Message> messages, int maxTokens) {
         AIModelConfig config = configRepository.findByIsActiveTrue()
                 .orElseThrow(() -> new BusinessException("未配置可用的AI模型，请在设置中配置"));
 
         String requestJson;
         try {
-            requestJson = buildRequestBody(config, messages);
+            requestJson = buildRequestBody(config, messages, maxTokens);
         } catch (JacksonException e) {
             throw new BusinessException("AI模型请求体构建失败: " + e.getMessage(), e);
         }
@@ -84,7 +105,7 @@ public class LlmServiceImpl implements LlmService {
     /**
      * 构建 OpenAI 兼容的 chat/completions 请求体（model, messages, temperature, max_tokens, stream）。
      */
-    private String buildRequestBody(AIModelConfig config, List<Message> messages) throws JacksonException {
+    private String buildRequestBody(AIModelConfig config, List<Message> messages, int maxTokens) throws JacksonException {
         ObjectNode root = OBJECT_MAPPER.createObjectNode();
         root.put("model", config.getModelName());
         ArrayNode messagesNode = root.putArray("messages");
@@ -94,7 +115,7 @@ public class LlmServiceImpl implements LlmService {
             msg.put("content", m.content());
         }
         root.put("temperature", 0.7);
-        root.put("max_tokens", 4096);
+        root.put("max_tokens", maxTokens > 0 ? maxTokens : DEFAULT_MAX_TOKENS);
         root.put("stream", false);
         return OBJECT_MAPPER.writeValueAsString(root);
     }

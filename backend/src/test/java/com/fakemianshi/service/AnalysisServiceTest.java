@@ -35,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -160,7 +161,7 @@ class AnalysisServiceTest {
         String llmJson = """
                 {"overallScore":72.5,"strengths":["Java基础扎实","集合框架理解较好"],"weaknesses":["并发编程理解不深"],"knowledgeGaps":["JVM垃圾回收","Spring事务传播机制"],"improvementPlan":{"topics":["JVM","并发编程"],"suggestions":["阅读源码","动手实践"]},"questionAnalyses":[{"questionContent":"单选：以下哪个是并发关键字？","answerContent":"A","accuracy":8,"depth":0,"clarity":0,"fluency":0,"tone":"","improvementSuggestion":"需要区分synchronized与volatile"},{"questionContent":"简述 HashMap 的扩容机制","answerContent":"扩容为两倍","accuracy":5,"depth":4,"clarity":5,"fluency":0,"tone":"","improvementSuggestion":"补充扩容触发条件与步骤"}]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
+        when(llmService.chat(anyString(), anyString(), anyInt())).thenReturn(new LlmResponse(llmJson, "stop", 100));
 
         SessionAnalysis saved = service.analyzeSession(1L);
 
@@ -207,7 +208,7 @@ class AnalysisServiceTest {
         String llmJson = """
                 {"overallScore":80,"strengths":["表达清晰"],"weaknesses":["深度不足"],"knowledgeGaps":["JVM调优"],"communicationEvaluation":"候选人表达清晰、逻辑连贯，但偶有停顿与口头禅。","improvementPlan":{"topics":["JVM"],"suggestions":["多实践"]},"questionAnalyses":[{"questionContent":"请谈谈你对JVM内存模型的理解","answerContent":"栈管运行，堆管存储","accuracy":6,"depth":4,"clarity":7,"fluency":6,"tone":"自信","improvementSuggestion":"补充堆内存细节"}]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
+        when(llmService.chat(anyString(), anyString(), anyInt())).thenReturn(new LlmResponse(llmJson, "stop", 100));
 
         SessionAnalysis saved = service.analyzeSession(2L);
 
@@ -233,7 +234,7 @@ class AnalysisServiceTest {
         String llmJson = """
                 {"overallScore":65,"overallLevel":"中级工程师","expectedSalaryRange":"18k-25k","strengths":["基础较稳"],"weaknesses":["并发理解浅"],"knowledgeGaps":[{"point":"AQS原理","explanation":"AQS基于volatile state和CLH队列，支持独占/共享两种模式，ReentrantLock依赖它实现重入与公平锁。"}],"personalitySummary":"表达谨慎、逻辑尚可，遇到不熟的问题容易绕弯。","characterTraits":["谨慎","条理清晰"],"characterDefects":[{"defect":"不熟的问题易绕弯","improvement":"先直接说不知道，再给部分理解与思路"}],"improvementPlan":{"topics":[{"topic":"并发编程","action":"精读AQS源码并画时序图","example":"以ReentrantLock加锁为例，画出acquire队列流转"}],"suggestions":["每周一道并发题"]},"questionAnalyses":[{"questionContent":"单选：synchronized 和 ReentrantLock 的区别？","answerContent":"B","category":"并发","difficulty":"中级","focusPoint":"考察锁机制与AQS的理解","accuracy":3,"accuracyReason":"选错了答案，混淆了公平锁与可重入概念，准确性不足","depth":0,"depthReason":"客观题无展开，深度不评分","clarity":0,"clarityReason":"客观题无表达，清晰度不评分","fluency":0,"fluencyReason":"客观题无口语表达，流畅度不评分","tone":"","answerApproach":"先答两者本质（内置锁vs显式锁），再从可中断/公平/超时/条件队列展开","example":"synchronized是JVM内置锁，ReentrantLock基于AQS支持中断、超时与公平策略…","improvementSuggestion":"补充AQS与锁升级知识"}]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
+        when(llmService.chat(anyString(), anyString(), anyInt())).thenReturn(new LlmResponse(llmJson, "stop", 100));
 
         SessionAnalysis saved = service.analyzeSession(3L);
 
@@ -349,7 +350,7 @@ class AnalysisServiceTest {
         String llmJson = """
                 {"trends":[{"dimension":"总体评分","trend":"上升","detail":"分数持续提高"},{"dimension":"技术深度","trend":"平稳","detail":"深度有待加强"},{"dimension":"沟通表达","trend":"上升","detail":"表达更清晰"}],"recurringWeaknesses":["JVM垃圾回收"],"recommendedFocus":["并发编程","JVM","Spring"],"overallProgress":"整体稳步提升"}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
+        when(llmService.chat(anyString(), anyString(), anyInt())).thenReturn(new LlmResponse(llmJson, "stop", 100));
 
         HistoricalAnalysis historical = service.analyzeHistory(10L);
 

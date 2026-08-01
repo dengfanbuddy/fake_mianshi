@@ -15,9 +15,19 @@ public interface LlmService {
     LlmResponse chat(String systemPrompt, String userPrompt);
 
     /**
+     * 以 system + user 两条消息对话，可指定输出最大 token 数（长文本分析任务用）。
+     */
+    LlmResponse chat(String systemPrompt, String userPrompt, int maxTokens);
+
+    /**
      * 以完整的消息列表对话，可自由控制 role（system / user / assistant）。
      */
     LlmResponse chat(List<Message> messages);
+
+    /**
+     * 以完整的消息列表对话，可指定输出最大 token 数（长文本分析任务用）。
+     */
+    LlmResponse chat(List<Message> messages, int maxTokens);
 
     /**
      * 对话消息。

@@ -22,8 +22,11 @@ import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.LlmService;
+import com.fakemianshi.service.impl.LlmServiceImpl;
 import com.fakemianshi.util.JsonExtractor;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -49,6 +52,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AnalysisServiceImpl implements AnalysisService {
+
+    private static final Logger log = LoggerFactory.getLogger(AnalysisServiceImpl.class);
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -290,19 +295,27 @@ public class AnalysisServiceImpl implements AnalysisService {
 
     // ---------------- 内部方法 ----------------
 
-    /** 调用 LLM 并将返回内容提取、解析为 JSON 对象，带分层容错 */
+    /** 调用 LLM 并将返回内容提取、解析为 JSON 对象，带分层容错；分析报告输出较长，使用大 max_tokens */
     private JsonNode callLlm(String systemPrompt, String userPrompt) {
-        LlmResponse response = llmService.chat(systemPrompt, userPrompt);
-        String json = JsonExtractor.extractJsonObject(response.getContent());
+        LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.ANALYSIS_MAX_TOKENS);
+        String raw = response.getContent();
+        String json = JsonExtractor.extractJsonObject(raw);
         try {
             JsonNode node = OBJECT_MAPPER.readTree(json);
             if (node == null || !node.isObject()) {
+                log.warn("AI分析结果非JSON对象，原始输出前300字: {}", truncate(raw, 300));
                 throw new BusinessException("AI分析结果格式异常，请重试");
             }
             return node;
         } catch (JacksonException e) {
+            log.warn("AI分析结果JSON解析失败，原始输出前300字: {}", truncate(raw, 300), e);
             throw new BusinessException("AI分析结果格式异常，请重试", e);
         }
+    }
+
+    private String truncate(String s, int max) {
+        if (s == null) return "null";
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     /** 组装笔试上下文：逐题列出题目、参考答案、用户答案与自动判分结果 */
