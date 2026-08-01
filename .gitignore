@@ -1,17 +1,35 @@
+# ---------- 依赖与构建产物 ----------
 node_modules/
 dist/
 dist-check/
 dist-build-check/
 dist-verify/
-*.log
 target/
+*.log
+
+# ---------- 运行时数据（含敏感信息，严禁提交） ----------
 uploads/
 data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ---------- 密钥与本地配置 ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ---------- 编辑器 / 系统 ----------
 .idea/
 .vscode/
-test_silence.wav
-backend-run.log
-backend-run-err.log
+.DS_Store
+Thumbs.db
+
+# ---------- 临时文件 ----------
 test_silence.wav
 backend-run.log
 backend-run-err.log
