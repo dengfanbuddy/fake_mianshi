@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -55,7 +56,8 @@ public class PositionRequirementServiceImpl implements PositionRequirementServic
     @Transactional
     public PositionRequirement createFromResume(Long projectId) {
         PositionRequirement existing = getByProjectId(projectId);
-        if (existing != null) {
+        // 手动填写的职位需求不被自动覆盖；简历来源的可刷新
+        if (existing != null && !"RESUME".equals(existing.getSource())) {
             return existing;
         }
 
@@ -64,22 +66,67 @@ public class PositionRequirementServiceImpl implements PositionRequirementServic
             throw new BusinessException("请先上传并分析简历");
         }
 
-        String suggestedPosition = null;
-        String suggestedSeniority = null;
+        PositionRequirement req = existing != null ? existing : new PositionRequirement();
+        req.setProjectId(projectId);
+        req.setSource("RESUME");
         try {
             JsonNode root = OBJECT_MAPPER.readTree(resume.getAnalysisResult());
-            suggestedPosition = extractText(root, "suggestedPosition");
-            suggestedSeniority = extractText(root, "suggestedSeniority");
+            req.setJobTitle(extractText(root, "suggestedPosition"));
+            req.setSeniority(extractText(root, "suggestedSeniority"));
+
+            // 经验年限：数字 → "X年"
+            JsonNode expNode = root.get("experienceYears");
+            if (expNode != null && expNode.isNumber() && expNode.asInt() > 0) {
+                req.setExperience(expNode.asInt() + "年");
+            }
+
+            // 技术栈：数组 → JSON 字符串（前端解析为标签）
+            JsonNode techStackNode = root.get("techStack");
+            if (techStackNode != null && techStackNode.isArray() && !techStackNode.isEmpty()) {
+                List<String> techs = new ArrayList<>();
+                techStackNode.forEach(n -> {
+                    if (n.isTextual() && !n.asText().isBlank()) {
+                        techs.add(n.asText().trim());
+                    }
+                });
+                if (!techs.isEmpty()) {
+                    req.setTechStack(OBJECT_MAPPER.writeValueAsString(techs));
+                }
+            }
+
+            // 职位描述：由当前职位 + 教育背景 + 项目经历拼接
+            req.setJobDescription(buildDescription(root));
         } catch (Exception e) {
             throw new BusinessException("简历分析结果解析失败: " + e.getMessage());
         }
-
-        PositionRequirement req = new PositionRequirement();
-        req.setProjectId(projectId);
-        req.setJobTitle(suggestedPosition);
-        req.setSeniority(suggestedSeniority);
-        req.setSource("RESUME");
         return positionRequirementRepository.save(req);
+    }
+
+    /** 由简历分析拼装职位描述文本，无可用信息时返回 null */
+    private String buildDescription(JsonNode root) {
+        StringBuilder sb = new StringBuilder();
+        String current = extractText(root, "currentPosition");
+        String education = extractText(root, "education");
+        if (current != null && !current.isBlank()) {
+            sb.append("当前职位：").append(current);
+        }
+        if (education != null && !education.isBlank()) {
+            if (sb.length() > 0) sb.append("；");
+            sb.append("教育背景：").append(education);
+        }
+        JsonNode projects = root.get("projects");
+        if (projects != null && projects.isArray() && !projects.isEmpty()) {
+            List<String> list = new ArrayList<>();
+            projects.forEach(n -> {
+                String t = n.isTextual() ? n.asText().trim() : n.toString().trim();
+                if (!t.isBlank()) list.add(t);
+            });
+            if (!list.isEmpty()) {
+                if (sb.length() > 0) sb.append("；");
+                sb.append("项目经历：").append(String.join("；", list));
+            }
+        }
+        return sb.length() > 0 ? sb.toString() : null;
     }
 
     /** 提取节点文本，字段缺失或为非文本值时返回 null */
