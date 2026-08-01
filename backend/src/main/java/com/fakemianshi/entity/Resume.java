@@ -1,6 +1,6 @@
 package com.fakemianshi.entity;
 
-import jakarta.persistence.*;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -9,39 +9,32 @@ import java.time.LocalDateTime;
  * 简历：上传的简历文件及其解析/分析结果。
  */
 @Data
-@Entity
-@Table(name = "resume")
+@TableName("resume")
 public class Resume {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 所属项目 ID */
-    @Column(name = "project_id", nullable = false)
+    @TableField("project_id")
     private Long projectId;
 
     /** 文件存储路径 */
-    @Column(name = "file_path", length = 500)
+    @TableField("file_path")
     private String filePath;
 
     /** 原始文件名 */
-    @Column(name = "original_filename", length = 255)
+    @TableField("original_filename")
     private String originalFilename;
 
     /** 解析出的纯文本内容 */
-    @Column(length = 50000)
     private String parsedText;
 
     /** 简历分析结果（JSON） */
-    @Column(name = "analysis_result", length = 50000)
+    @TableField("analysis_result")
     private String analysisResult;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
-    @PrePersist
-    public void prePersist() {
-        this.createdAt = LocalDateTime.now();
     }
-}

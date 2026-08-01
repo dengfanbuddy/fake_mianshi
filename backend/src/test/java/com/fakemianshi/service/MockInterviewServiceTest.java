@@ -104,27 +104,27 @@ class MockInterviewServiceTest {
         when(projectService.findById(1L)).thenReturn(new InterviewProject());
 
         // 模拟会话落库：save 分配 id 并存入 map，findById 从 map 取
-        when(sessionRepository.save(any(InterviewSession.class))).thenAnswer(inv -> {
+        when(sessionRepository.insert(any(InterviewSession.class))).thenAnswer(inv -> {
             InterviewSession s = inv.getArgument(0);
             if (s.getId() == null) {
                 s.setId(sessionIdGen.getAndIncrement());
             }
             sessions.put(s.getId(), s);
-            return s;
+            return 1;
         });
-        when(sessionRepository.findById(anyLong()))
-                .thenAnswer(inv -> Optional.ofNullable(sessions.get(inv.getArgument(0))));
+        when(sessionRepository.selectById(anyLong()))
+                .thenAnswer(inv -> sessions.get(inv.getArgument(0)));
         when(sessionRepository.findByProjectIdAndTypeAndStatusOrderByCompletedAtDesc(anyLong(), anyString(), anyString()))
                 .thenReturn(List.of());
 
         // 模拟消息落库：save 加入 list，findBySessionId 返回全部
-        when(messageRepository.save(any(MockInterviewMessage.class))).thenAnswer(inv -> {
+        when(messageRepository.insert(any(MockInterviewMessage.class))).thenAnswer(inv -> {
             MockInterviewMessage m = inv.getArgument(0);
             if (m.getId() == null) {
                 m.setId((long) (messages.size() + 1));
             }
             messages.add(m);
-            return m;
+            return 1;
         });
         when(messageRepository.findBySessionIdOrderByCreatedAt(anyLong()))
                 .thenAnswer(inv -> new ArrayList<>(messages));

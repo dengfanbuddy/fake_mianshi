@@ -86,13 +86,13 @@ class AnalysisServiceTest {
                 weaknessTagRepository, historicalAnalysisRepository, llmService);
 
         // 会话分析内存库
-        when(sessionAnalysisRepository.save(any(SessionAnalysis.class))).thenAnswer(inv -> {
+        when(sessionAnalysisRepository.insert(any(SessionAnalysis.class))).thenAnswer(inv -> {
             SessionAnalysis a = inv.getArgument(0);
             if (a.getId() == null) {
                 a.setId((long) (analysisStore.size() + 1));
             }
             analysisStore.add(a);
-            return a;
+            return 1;
         });
         when(sessionAnalysisRepository.findBySessionId(anyLong())).thenAnswer(inv -> {
             Long sid = inv.getArgument(0);
@@ -100,10 +100,10 @@ class AnalysisServiceTest {
         });
 
         // 单题分析内存库
-        when(questionAnalysisRepository.save(any(QuestionAnalysis.class))).thenAnswer(inv -> {
+        when(questionAnalysisRepository.insert(any(QuestionAnalysis.class))).thenAnswer(inv -> {
             QuestionAnalysis qa = inv.getArgument(0);
             questionAnalysisStore.add(qa);
-            return qa;
+            return 1;
         });
         when(questionAnalysisRepository.findBySessionId(anyLong())).thenAnswer(inv -> {
             Long sid = inv.getArgument(0);
@@ -112,23 +112,23 @@ class AnalysisServiceTest {
 
         // 弱点标签内存库：findByProjectId 返回副本（对象引用相同），save 负责插入/更新
         when(weaknessTagRepository.findByProjectId(anyLong())).thenAnswer(inv -> new ArrayList<>(weaknessTagsStore));
-        when(weaknessTagRepository.save(any(WeaknessTag.class))).thenAnswer(inv -> {
+        when(weaknessTagRepository.insert(any(WeaknessTag.class))).thenAnswer(inv -> {
             WeaknessTag t = inv.getArgument(0);
             if (t.getId() == null) {
                 t.setId((long) (weaknessTagsStore.size() + 1));
                 weaknessTagsStore.add(t);
             }
-            return t;
+            return 1;
         });
 
         // 历史分析内存库
-        when(historicalAnalysisRepository.save(any(HistoricalAnalysis.class))).thenAnswer(inv -> {
+        when(historicalAnalysisRepository.insert(any(HistoricalAnalysis.class))).thenAnswer(inv -> {
             HistoricalAnalysis h = inv.getArgument(0);
             if (h.getId() == null) {
                 h.setId((long) (historyStore.size() + 1));
             }
             historyStore.add(h);
-            return h;
+            return 1;
         });
     }
 
@@ -137,7 +137,7 @@ class AnalysisServiceTest {
     @Test
     void analyzeSession_written_shouldSaveAnalysisAndQuestionsAndUpdateWeaknessTags() {
         InterviewSession session = session(1L, 10L, "WRITTEN");
-        when(sessionRepository.findById(1L)).thenReturn(Optional.of(session));
+        when(sessionRepository.selectById(1L)).thenReturn(session);
 
         // 题目 + 答案：一题自动判分客观题、一题简答题
         WrittenTestQuestion q1 = writtenQuestion(100L, "SINGLE_CHOICE", "单选：以下哪个是并发关键字？");
@@ -199,7 +199,7 @@ class AnalysisServiceTest {
     @Test
     void analyzeSession_mock_shouldParseCommunicationEvaluation() {
         InterviewSession session = session(2L, 10L, "MOCK");
-        when(sessionRepository.findById(2L)).thenReturn(Optional.of(session));
+        when(sessionRepository.selectById(2L)).thenReturn(session);
 
         MockInterviewMessage m1 = mockMessage(1L, "INTERVIEWER", "请谈谈你对JVM内存模型的理解");
         MockInterviewMessage m2 = mockMessage(2L, "CANDIDATE", "栈管运行，堆管存储");
@@ -224,7 +224,7 @@ class AnalysisServiceTest {
     @Test
     void analyzeSession_written_shouldParseNewFormatFields() {
         InterviewSession session = session(3L, 10L, "WRITTEN");
-        when(sessionRepository.findById(3L)).thenReturn(Optional.of(session));
+        when(sessionRepository.selectById(3L)).thenReturn(session);
 
         WrittenTestQuestion q1 = writtenQuestion(300L, "SINGLE_CHOICE", "单选：synchronized 和 ReentrantLock 的区别？");
         when(writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(3L)).thenReturn(List.of(q1));
@@ -319,7 +319,7 @@ class AnalysisServiceTest {
     @Test
     void analyzeSession_shouldReturnExistingAnalysis_withoutCallingLlm() {
         InterviewSession session = session(1L, 10L, "WRITTEN");
-        when(sessionRepository.findById(1L)).thenReturn(Optional.of(session));
+        when(sessionRepository.selectById(1L)).thenReturn(session);
 
         SessionAnalysis existing = new SessionAnalysis();
         existing.setId(1L);

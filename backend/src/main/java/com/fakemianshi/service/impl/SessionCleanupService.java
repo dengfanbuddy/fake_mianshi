@@ -1,5 +1,10 @@
 package com.fakemianshi.service.impl;
 
+import com.fakemianshi.entity.WrittenTestAnswer;
+import com.fakemianshi.entity.WrittenTestQuestion;
+import com.fakemianshi.entity.MockInterviewMessage;
+import com.fakemianshi.entity.SessionAnalysis;
+import com.fakemianshi.entity.QuestionAnalysis;
 import com.fakemianshi.repository.InterviewSessionRepository;
 import com.fakemianshi.repository.MockInterviewMessageRepository;
 import com.fakemianshi.repository.QuestionAnalysisRepository;
@@ -30,13 +35,13 @@ public class SessionCleanupService {
     /** 删除单个会话及其全部关联数据与录音文件 */
     @Transactional
     public void deleteSession(Long sessionId) {
-        writtenTestAnswerRepository.deleteAll(writtenTestAnswerRepository.findBySessionId(sessionId));
-        writtenTestQuestionRepository.deleteAll(
-                writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(sessionId));
-        mockInterviewMessageRepository.deleteAll(
-                mockInterviewMessageRepository.findBySessionIdOrderByCreatedAt(sessionId));
-        sessionAnalysisRepository.deleteAll(sessionAnalysisRepository.findBySessionId(sessionId));
-        questionAnalysisRepository.deleteAll(questionAnalysisRepository.findBySessionId(sessionId));
+        writtenTestAnswerRepository.deleteByIds(writtenTestAnswerRepository.findBySessionId(sessionId).stream().map(WrittenTestAnswer::getId).toList());
+        writtenTestQuestionRepository.deleteByIds(
+                writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(sessionId).stream().map(WrittenTestQuestion::getId).toList());
+        mockInterviewMessageRepository.deleteByIds(
+                mockInterviewMessageRepository.findBySessionIdOrderByCreatedAt(sessionId).stream().map(MockInterviewMessage::getId).toList());
+        sessionAnalysisRepository.deleteByIds(sessionAnalysisRepository.findBySessionId(sessionId).stream().map(SessionAnalysis::getId).toList());
+        questionAnalysisRepository.deleteByIds(questionAnalysisRepository.findBySessionId(sessionId).stream().map(QuestionAnalysis::getId).toList());
         sessionRepository.deleteById(sessionId);
         // 清理磁盘录音
         audioStorageUtil.deleteSessionAudio(sessionId);

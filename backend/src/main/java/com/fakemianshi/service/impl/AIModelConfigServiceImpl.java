@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * AI 模型配置服务实现。
@@ -25,7 +26,7 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
 
     @Override
     public List<AIModelConfig> findAll() {
-        return repository.findAll();
+        return repository.selectList(null);
     }
 
     @Override
@@ -36,32 +37,38 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
         }
         // 编辑场景（带 id）：保留服务端管理的 createdAt，避免 JPA merge 将其覆盖为 null
         if (config.getId() != null) {
-            repository.findById(config.getId()).ifPresent(existing ->
+            Optional.ofNullable(repository.selectById(config.getId())).ifPresent(existing ->
                     config.setCreatedAt(existing.getCreatedAt()));
         }
         if (Boolean.TRUE.equals(config.getIsActive())) {
             deactivateOthers(config.getId());
         }
-        return repository.save(config);
+        if (config.getId() == null) {
+            repository.insert(config);
+        } else {
+            repository.updateById(config);
+        }
+        return config;
     }
 
     @Override
     @Transactional
     public AIModelConfig setActive(Long id) {
-        AIModelConfig target = repository.findById(id)
+        AIModelConfig target = Optional.ofNullable(repository.selectById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("AI模型配置不存在: id=" + id));
         deactivateOthers(id);
         target.setIsActive(true);
-        return repository.save(target);
+        repository.updateById(target);
+        return target;
     }
 
     /** 将除 selfId 之外所有 active 的配置设为 false */
     private void deactivateOthers(Long selfId) {
-        for (AIModelConfig c : repository.findAll()) {
+        for (AIModelConfig c : repository.selectList(null)) {
             boolean isSelf = selfId != null && selfId.equals(c.getId());
             if (!isSelf && Boolean.TRUE.equals(c.getIsActive())) {
                 c.setIsActive(false);
-                repository.save(c);
+                repository.updateById(c);
             }
         }
     }

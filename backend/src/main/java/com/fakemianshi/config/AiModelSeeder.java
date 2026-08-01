@@ -19,7 +19,7 @@ public class AiModelSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (configRepository.count() > 0) {
+        if (configRepository.selectCount(null) > 0) {
             return;
         }
         AIModelConfig config = new AIModelConfig();
@@ -28,7 +28,7 @@ public class AiModelSeeder implements CommandLineRunner {
         config.setApiKey("");
         config.setModelName("deepseek-chat");
         config.setIsActive(true);
-        configRepository.save(config);
+        configRepository.insert(config);
         log.info("AiModelSeeder: 已插入默认 DeepSeek 配置（请在设置页填写 API Key）");
     }
 }

@@ -24,6 +24,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 出题引擎实现：将职位需求、简历、弱点标签组装为 LLM 上下文，
@@ -72,7 +73,8 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
         int orderNum = 1;
         for (JsonNode item : items) {
             WrittenTestQuestion question = toQuestion(item, sessionId, orderNum++);
-            questions.add(writtenTestQuestionRepository.save(question));
+            writtenTestQuestionRepository.insert(question);
+            questions.add(question);
         }
         return questions;
     }
@@ -97,7 +99,7 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     @Override
     @Transactional(readOnly = true)
     public String generateOpeningMessage(Long projectId, Long personaId) {
-        InterviewerPersona persona = interviewerPersonaRepository.findById(personaId)
+        InterviewerPersona persona = Optional.ofNullable(interviewerPersonaRepository.selectById(personaId))
                 .orElseThrow(() -> new BusinessException("面试官人设不存在: id=" + personaId));
 
         PositionRequirement req = positionRequirementService.getByProjectId(projectId);

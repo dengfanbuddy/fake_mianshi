@@ -4,6 +4,10 @@ import com.fakemianshi.config.BusinessException;
 import com.fakemianshi.config.ResourceNotFoundException;
 import com.fakemianshi.entity.InterviewProject;
 import com.fakemianshi.entity.InterviewSession;
+import com.fakemianshi.entity.Resume;
+import com.fakemianshi.entity.WeaknessTag;
+import com.fakemianshi.entity.HistoricalAnalysis;
+import com.fakemianshi.entity.PositionRequirement;
 import com.fakemianshi.repository.HistoricalAnalysisRepository;
 import com.fakemianshi.repository.InterviewProjectRepository;
 import com.fakemianshi.repository.InterviewSessionRepository;
@@ -16,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 面试项目服务实现。
@@ -43,7 +48,7 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(readOnly = true)
     public InterviewProject findById(Long id) {
-        return projectRepository.findById(id)
+        return Optional.ofNullable(projectRepository.selectById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("面试项目不存在: id=" + id));
     }
 
@@ -54,7 +59,8 @@ public class ProjectServiceImpl implements ProjectService {
             throw new BusinessException("项目名称不能为空");
         }
         project.setId(null);
-        return projectRepository.save(project);
+        projectRepository.insert(project);
+        return project;
     }
 
     @Override
@@ -63,7 +69,8 @@ public class ProjectServiceImpl implements ProjectService {
         InterviewProject existing = findById(id);
         existing.setName(project.getName());
         existing.setDescription(project.getDescription());
-        return projectRepository.save(existing);
+        projectRepository.updateById(existing);
+        return existing;
     }
 
     @Override
@@ -77,11 +84,11 @@ public class ProjectServiceImpl implements ProjectService {
             sessionCleanupService.deleteSession(session.getId());
         }
 
-        resumeRepository.deleteAll(resumeRepository.findByProjectId(id));
-        weaknessTagRepository.deleteAll(weaknessTagRepository.findByProjectId(id));
-        historicalAnalysisRepository.deleteAll(historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(id));
-        positionRequirementRepository.deleteAll(positionRequirementRepository.findByProjectId(id));
+        resumeRepository.deleteByIds(resumeRepository.findByProjectId(id).stream().map(Resume::getId).toList());
+        weaknessTagRepository.deleteByIds(weaknessTagRepository.findByProjectId(id).stream().map(WeaknessTag::getId).toList());
+        historicalAnalysisRepository.deleteByIds(historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(id).stream().map(HistoricalAnalysis::getId).toList());
+        positionRequirementRepository.deleteByIds(positionRequirementRepository.findByProjectId(id).stream().map(PositionRequirement::getId).toList());
 
-        projectRepository.delete(project);
+        projectRepository.deleteById(project.getId());
     }
 }

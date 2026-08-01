@@ -32,6 +32,7 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -80,7 +81,7 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         session.setStatus("IN_PROGRESS");
         session.setTimeLimit(timeLimit);
         session.setStartedAt(LocalDateTime.now());
-        sessionRepository.save(session);
+        sessionRepository.insert(session);
 
         List<WrittenTestQuestion> questions =
                 questionGenerationService.generateWrittenTestQuestions(session.getId(), projectId, questionCount);
@@ -97,7 +98,7 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     @Override
     @Transactional
     public WrittenTestSubmitResponse submit(Long sessionId, WrittenTestSubmitRequest req) {
-        InterviewSession session = sessionRepository.findById(sessionId)
+        InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("笔试已提交或不存在"));
         if (!"IN_PROGRESS".equals(session.getStatus())) {
             throw new BusinessException("笔试已提交或不存在");
@@ -147,14 +148,14 @@ public class WrittenTestServiceImpl implements WrittenTestService {
                     correctCount++;
                 }
             }
-            answerRepository.save(answer);
+            answerRepository.insert(answer);
             results.add(result);
         }
 
         double totalScore = normalizeScore(earned, full);
         session.setStatus("COMPLETED");
         session.setCompletedAt(LocalDateTime.now());
-        sessionRepository.save(session);
+        sessionRepository.updateById(session);
 
         // 自动触发会话分析（在事务提交后执行，失败不阻断提交）
         triggerAnalysisAfterCommit(sessionId);
@@ -171,7 +172,7 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     @Override
     @Transactional(readOnly = true)
     public WrittenTestDetailResponse getDetail(Long sessionId) {
-        InterviewSession session = sessionRepository.findById(sessionId)
+        InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new ResourceNotFoundException("笔试会话不存在: id=" + sessionId));
         // 类型校验：模拟面试会话不应走笔试详情接口（前端以此判定会话类型）
         if (!"WRITTEN".equals(session.getType())) {

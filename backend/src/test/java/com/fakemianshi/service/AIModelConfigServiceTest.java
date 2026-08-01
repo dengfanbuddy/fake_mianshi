@@ -32,8 +32,8 @@ class AIModelConfigServiceTest {
         repository = mock(AIModelConfigRepository.class);
         service = new AIModelConfigServiceImpl(repository);
         // save 直接返回传入对象，模拟 JPA 行为
-        when(repository.save(any(AIModelConfig.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.insert(any(AIModelConfig.class)))
+                .thenAnswer(invocation -> 1);
     }
 
     @Test
@@ -58,7 +58,7 @@ class AIModelConfigServiceTest {
         newConfig.setId(2L);
         newConfig.setIsActive(true);
 
-        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(existing, newConfig)));
+        when(repository.selectList(null)).thenReturn(new ArrayList<>(List.of(existing, newConfig)));
 
         AIModelConfig saved = service.save(newConfig);
 
@@ -76,7 +76,7 @@ class AIModelConfigServiceTest {
         newConfig.setId(2L);
         newConfig.setIsActive(false);
 
-        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(existing, newConfig)));
+        when(repository.selectList(null)).thenReturn(new ArrayList<>(List.of(existing, newConfig)));
 
         service.save(newConfig);
 
@@ -93,8 +93,8 @@ class AIModelConfigServiceTest {
         c2.setId(2L);
         c2.setIsActive(false);
 
-        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(c1, c2)));
-        when(repository.findById(2L)).thenReturn(Optional.of(c2));
+        when(repository.selectList(null)).thenReturn(new ArrayList<>(List.of(c1, c2)));
+        when(repository.selectById(2L)).thenReturn(c2);
 
         AIModelConfig result = service.setActive(2L);
 
@@ -109,8 +109,8 @@ class AIModelConfigServiceTest {
         c1.setId(1L);
         c1.setIsActive(true);
 
-        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(c1)));
-        when(repository.findById(1L)).thenReturn(Optional.of(c1));
+        when(repository.selectList(null)).thenReturn(new ArrayList<>(List.of(c1)));
+        when(repository.selectById(1L)).thenReturn(c1);
 
         AIModelConfig result = service.setActive(1L);
 
@@ -119,7 +119,7 @@ class AIModelConfigServiceTest {
 
     @Test
     void setActive_shouldThrow_whenIdNotFound() {
-        when(repository.findById(999L)).thenReturn(Optional.empty());
+        when(repository.selectById(999L)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class, () -> service.setActive(999L));
     }
@@ -141,8 +141,8 @@ class AIModelConfigServiceTest {
         editRequest.setModelName("deepseek-chat");
         editRequest.setIsActive(true);
 
-        when(repository.findById(1L)).thenReturn(Optional.of(existing));
-        when(repository.findAll()).thenReturn(new ArrayList<>(List.of(existing)));
+        when(repository.selectById(1L)).thenReturn(existing);
+        when(repository.selectList(null)).thenReturn(new ArrayList<>(List.of(existing)));
 
         AIModelConfig saved = service.save(editRequest);
 
@@ -154,7 +154,7 @@ class AIModelConfigServiceTest {
     void findAll_shouldReturnAllConfigs() {
         AIModelConfig c1 = new AIModelConfig();
         c1.setId(1L);
-        when(repository.findAll()).thenReturn(List.of(c1));
+        when(repository.selectList(null)).thenReturn(List.of(c1));
 
         assertEquals(1, service.findAll().size());
     }

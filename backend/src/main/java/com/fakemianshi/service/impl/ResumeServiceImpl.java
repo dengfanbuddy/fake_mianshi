@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 简历服务实现。
@@ -65,7 +66,8 @@ public class ResumeServiceImpl implements ResumeService {
             resume.setFilePath(target.toString());
             resume.setOriginalFilename(originalFilename);
             resume.setParsedText(PdfUtil.extractText(target.toFile()));
-            return resumeRepository.save(resume);
+            resumeRepository.insert(resume);
+            return resume;
         } catch (IOException e) {
             throw new BusinessException("简历文件保存失败: " + e.getMessage(), e);
         }
@@ -83,7 +85,7 @@ public class ResumeServiceImpl implements ResumeService {
     @Override
     @Transactional
     public Resume analyze(Long resumeId) {
-        Resume resume = resumeRepository.findById(resumeId)
+        Resume resume = Optional.ofNullable(resumeRepository.selectById(resumeId))
                 .orElseThrow(() -> new ResourceNotFoundException("简历不存在: id=" + resumeId));
 
         String systemPrompt = """
@@ -102,7 +104,8 @@ public class ResumeServiceImpl implements ResumeService {
 
         LlmResponse response = llmService.chat(systemPrompt, resume.getParsedText());
         resume.setAnalysisResult(response.getContent());
-        return resumeRepository.save(resume);
+        resumeRepository.updateById(resume);
+        return resume;
     }
 
     /** 去除文件名中的路径分隔符，防止路径穿越 */

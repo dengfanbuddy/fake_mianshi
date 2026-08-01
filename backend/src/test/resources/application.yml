@@ -1,13 +1,10 @@
 server:
-  port: 8080
-  servlet:
-    context-path: /api
+  port: 0
 
 spring:
   datasource:
-    url: jdbc:sqlite:./data/fake_mianshi.db
+    url: jdbc:sqlite:./data/test_fake_mianshi.db
     driver-class-name: org.sqlite.JDBC
-  # 启动时执行 schema.sql（幂等建表，兼容克隆后的空库与已有库）
   sql:
     init:
       mode: always
@@ -18,7 +15,6 @@ spring:
       max-file-size: 10MB
       max-request-size: 50MB
 
-# MyBatis-Plus 配置
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
@@ -29,9 +25,3 @@ mybatis-plus:
 app:
   upload-dir: ./uploads
   audio-dir: ./uploads/audio
-
-tencent:
-  cloud:
-    secret-id: ${TENCENT_SECRET_ID:}
-    secret-key: ${TENCENT_SECRET_KEY:}
-    app-id: ${TENCENT_APP_ID:}

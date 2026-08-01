@@ -21,10 +21,10 @@ public class PersonaSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        if (personaRepository.count() > 0) {
+        if (personaRepository.selectCount(null) > 0) {
             return;
         }
-        personaRepository.saveAll(List.of(
+        for (InterviewerPersona p : List.of(
                 preset("技术深挖型",
                         "不断追问底层原理和实现细节，刨根问底，要求解释到源码级别",
                         "{\"tone\":\"serious\",\"speed\":\"medium\",\"aggressiveness\":0.8,\"followupStrategy\":\"deep_dive\"}"),
@@ -40,7 +40,9 @@ public class PersonaSeeder implements CommandLineRunner {
                 preset("八股文型",
                         "按知识点清单逐个问，标准化考察，不追问太深",
                         "{\"tone\":\"neutral\",\"speed\":\"medium\",\"aggressiveness\":0.4,\"followupStrategy\":\"checklist\"}")
-        ));
+        )) {
+            personaRepository.insert(p);
+        }
         log.info("PersonaSeeder: 已插入 5 种预设面试官风格");
     }
 

@@ -49,7 +49,12 @@ public class PositionRequirementServiceImpl implements PositionRequirementServic
         target.setTechStack(req.getTechStack());
         target.setJobDescription(req.getJobDescription());
         target.setSource(req.getSource());
-        return positionRequirementRepository.save(target);
+        if (target.getId() == null) {
+            positionRequirementRepository.insert(target);
+        } else {
+            positionRequirementRepository.updateById(target);
+        }
+        return target;
     }
 
     @Override
@@ -99,7 +104,12 @@ public class PositionRequirementServiceImpl implements PositionRequirementServic
         } catch (Exception e) {
             throw new BusinessException("简历分析结果解析失败: " + e.getMessage());
         }
-        return positionRequirementRepository.save(req);
+        if (req.getId() == null) {
+            positionRequirementRepository.insert(req);
+        } else {
+            positionRequirementRepository.updateById(req);
+        }
+        return req;
     }
 
     /** 由简历分析拼装职位描述文本，无可用信息时返回 null */

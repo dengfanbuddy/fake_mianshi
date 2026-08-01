@@ -71,7 +71,7 @@ class WrittenTestControllerTest {
     void setUp() {
         InterviewProject project = new InterviewProject();
         project.setName("笔试测试项目");
-        projectRepository.save(project);
+        projectRepository.insert(project);
         projectId = project.getId();
 
         when(questionGenerationService.generateWrittenTestQuestions(anyLong(), anyLong(), anyInt()))
@@ -118,7 +118,8 @@ class WrittenTestControllerTest {
             question.setId(null);
             question.setSessionId(sessionId);
             question.setOrderNum(orderNum++);
-            saved.add(questionRepository.save(question));
+            questionRepository.insert(question);
+            saved.add(question);
         }
         return saved;
     }
@@ -149,7 +150,7 @@ class WrittenTestControllerTest {
                 .andReturn().getResponse().getContentAsString();
 
         Long sessionId = objectMapper.readTree(body).path("data").path("sessionId").asLong();
-        InterviewSession session = sessionRepository.findById(sessionId).orElseThrow();
+        InterviewSession session = sessionRepository.selectById(sessionId);
         assertThat(session.getType()).isEqualTo("WRITTEN");
         assertThat(session.getStatus()).isEqualTo("IN_PROGRESS");
         assertThat(session.getTimeLimit()).isEqualTo(45);
@@ -166,7 +167,7 @@ class WrittenTestControllerTest {
                 .andReturn().getResponse().getContentAsString();
 
         Long sessionId = objectMapper.readTree(body).path("data").path("sessionId").asLong();
-        assertThat(sessionRepository.findById(sessionId).orElseThrow().getTimeLimit()).isEqualTo(60);
+        assertThat(sessionRepository.selectById(sessionId).getTimeLimit()).isEqualTo(60);
         verify(questionGenerationService).generateWrittenTestQuestions(anyLong(), anyLong(), eq(12));
     }
 
@@ -212,7 +213,7 @@ class WrittenTestControllerTest {
                 .andExpect(jsonPath("$.data.results[5].explanation").value("待AI分析"));
 
         // 会话已结束
-        InterviewSession session = sessionRepository.findById(data.sessionId).orElseThrow();
+        InterviewSession session = sessionRepository.selectById(data.sessionId);
         assertThat(session.getStatus()).isEqualTo("COMPLETED");
         assertThat(session.getCompletedAt()).isNotNull();
         // 6 道题全部落库了作答记录

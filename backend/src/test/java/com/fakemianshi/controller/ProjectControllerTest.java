@@ -144,7 +144,7 @@ class ProjectControllerTest {
     @Test
     void update_shouldModifyNameAndKeepCreatedAt() throws Exception {
         Long id = createProject("原名");
-        InterviewProject before = projectRepository.findById(id).orElseThrow();
+        InterviewProject before = projectRepository.selectById(id);
 
         mockMvc.perform(put(BASE + "/project/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -155,7 +155,7 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.data.name").value("新名"))
                 .andExpect(jsonPath("$.data.description").value("新描述"));
 
-        InterviewProject after = projectRepository.findById(id).orElseThrow();
+        InterviewProject after = projectRepository.selectById(id);
         assertThat(after.getCreatedAt()).isEqualTo(before.getCreatedAt());
     }
 
@@ -168,7 +168,7 @@ class ProjectControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
-        assertThat(projectRepository.existsById(projectId)).isFalse();
+        assertThat(projectRepository.selectById(projectId)).isNull();
         assertThat(resumeRepository.findByProjectId(projectId)).isEmpty();
         assertThat(sessionRepository.findByProjectIdOrderByCreatedAtDesc(projectId)).isEmpty();
         assertThat(weaknessTagRepository.findByProjectId(projectId)).isEmpty();
@@ -205,57 +205,57 @@ class ProjectControllerTest {
         resume.setOriginalFilename("resume.pdf");
         resume.setFilePath("/tmp/resume.pdf");
         resume.setParsedText("resume text");
-        resumeRepository.save(resume);
+        resumeRepository.insert(resume);
 
         WeaknessTag tag = new WeaknessTag();
         tag.setProjectId(projectId);
         tag.setKnowledgePoint("SQL索引");
         tag.setMasteryLevel("WEAK");
-        weaknessTagRepository.save(tag);
+        weaknessTagRepository.insert(tag);
 
         HistoricalAnalysis history = new HistoricalAnalysis();
         history.setProjectId(projectId);
         history.setAnalysisData("{}");
-        historicalAnalysisRepository.save(history);
+        historicalAnalysisRepository.insert(history);
 
         PositionRequirement pos = new PositionRequirement();
         pos.setProjectId(projectId);
         pos.setJobTitle("Java工程师");
         pos.setSource("MANUAL");
-        positionRequirementRepository.save(pos);
+        positionRequirementRepository.insert(pos);
 
         InterviewSession session = new InterviewSession();
         session.setProjectId(projectId);
         session.setType("WRITTEN");
         session.setStatus("COMPLETED");
-        sessionRepository.save(session);
+        sessionRepository.insert(session);
         Long sessionId = session.getId();
 
         WrittenTestQuestion question = new WrittenTestQuestion();
         question.setSessionId(sessionId);
         question.setType("SHORT_ANSWER");
         question.setContent("什么是索引？");
-        writtenTestQuestionRepository.save(question);
+        writtenTestQuestionRepository.insert(question);
 
         WrittenTestAnswer answer = new WrittenTestAnswer();
         answer.setSessionId(sessionId);
         answer.setQuestionId(question.getId());
         answer.setUserAnswer("加速查询");
-        writtenTestAnswerRepository.save(answer);
+        writtenTestAnswerRepository.insert(answer);
 
         MockInterviewMessage message = new MockInterviewMessage();
         message.setSessionId(sessionId);
         message.setRole("INTERVIEWER");
         message.setContent("请介绍你自己");
-        mockInterviewMessageRepository.save(message);
+        mockInterviewMessageRepository.insert(message);
 
         SessionAnalysis sessionAnalysis = new SessionAnalysis();
         sessionAnalysis.setSessionId(sessionId);
-        sessionAnalysisRepository.save(sessionAnalysis);
+        sessionAnalysisRepository.insert(sessionAnalysis);
 
         QuestionAnalysis questionAnalysis = new QuestionAnalysis();
         questionAnalysis.setSessionId(sessionId);
-        questionAnalysisRepository.save(questionAnalysis);
+        questionAnalysisRepository.insert(questionAnalysis);
 
         return sessionId;
     }

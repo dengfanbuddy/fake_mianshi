@@ -1,34 +1,32 @@
 package com.fakemianshi.entity;
 
-import jakarta.persistence.*;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 /**
  * 笔试作答：用户对一道笔试题的作答及判分结果。
  */
 @Data
-@Entity
-@Table(name = "written_test_answer")
+@TableName("written_test_answer")
 public class WrittenTestAnswer {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 关联的笔试题 ID */
-    @Column(name = "question_id", nullable = false)
+    @TableField("question_id")
     private Long questionId;
 
     /** 所属面试会话 ID */
-    @Column(name = "session_id", nullable = false)
+    @TableField("session_id")
     private Long sessionId;
 
     /** 用户作答内容 */
-    @Column(name = "user_answer", length = 5000)
+    @TableField("user_answer")
     private String userAnswer;
 
     /** 是否正确 */
-    @Column(name = "is_correct")
+    @TableField("is_correct")
     private Boolean isCorrect;
 
     /** 得分 */

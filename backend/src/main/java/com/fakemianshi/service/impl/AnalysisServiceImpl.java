@@ -38,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -126,7 +127,7 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Override
     @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {
-        InterviewSession session = sessionRepository.findById(sessionId)
+        InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("面试会话不存在: id=" + sessionId));
 
         // 幂等：已存在分析直接返回，不重复调用 LLM
@@ -146,11 +147,11 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
 
         SessionAnalysis analysis = toSessionAnalysis(sessionId, analysisNode);
-        sessionAnalysisRepository.save(analysis);
+        sessionAnalysisRepository.insert(analysis);
 
         for (QuestionAnalysis qa : parseQuestionAnalyses(analysisNode, sessionId, type)) {
             qa.setSessionId(sessionId);
-            questionAnalysisRepository.save(qa);
+            questionAnalysisRepository.insert(qa);
         }
 
         // 返回前自动更新弱点标签
@@ -179,7 +180,8 @@ public class AnalysisServiceImpl implements AnalysisService {
         HistoricalAnalysis historical = new HistoricalAnalysis();
         historical.setProjectId(projectId);
         historical.setAnalysisData(node.toString());
-        return historicalAnalysisRepository.save(historical);
+        historicalAnalysisRepository.insert(historical);
+        return historical;
     }
 
     @Override
@@ -207,7 +209,7 @@ public class AnalysisServiceImpl implements AnalysisService {
                 tag.setMasteryLevel(resolveMasteryLevel(count));
                 tag.setLastSessionId(sessionId);
                 tag.setUpdatedAt(LocalDateTime.now());
-                weaknessTagRepository.save(tag);
+                weaknessTagRepository.updateById(tag);
             } else {
                 WeaknessTag newTag = new WeaknessTag();
                 newTag.setProjectId(projectId);
@@ -216,7 +218,7 @@ public class AnalysisServiceImpl implements AnalysisService {
                 newTag.setOccurrenceCount(1);
                 newTag.setLastSessionId(sessionId);
                 newTag.setUpdatedAt(LocalDateTime.now());
-                weaknessTagRepository.save(newTag);
+                weaknessTagRepository.insert(newTag);
                 tags.add(newTag); // 供同批后续知识点匹配
             }
         }
@@ -286,9 +288,9 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Transactional
     public AnalysisResultDTO refreshAnalysis(Long sessionId) {
         // 先删除旧分析（单题分析 + 会话分析），再重新生成
-        questionAnalysisRepository.deleteAll(questionAnalysisRepository.findBySessionId(sessionId));
+        questionAnalysisRepository.deleteByIds(questionAnalysisRepository.findBySessionId(sessionId).stream().map(QuestionAnalysis::getId).toList());
         sessionAnalysisRepository.findBySessionId(sessionId)
-                .forEach(sessionAnalysisRepository::delete);
+                .forEach(a -> sessionAnalysisRepository.deleteById(a.getId()));
         analyzeSession(sessionId);
         return getSessionAnalysis(sessionId);
     }

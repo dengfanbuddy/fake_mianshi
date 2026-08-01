@@ -1,6 +1,6 @@
 package com.fakemianshi.entity;
 
-import jakarta.persistence.*;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -9,27 +9,21 @@ import java.time.LocalDateTime;
  * 历史分析快照：保存某时间点的项目级分析结果。
  */
 @Data
-@Entity
-@Table(name = "historical_analysis")
+@TableName("historical_analysis")
 public class HistoricalAnalysis {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 所属项目 ID */
-    @Column(name = "project_id", nullable = false)
+    @TableField("project_id")
     private Long projectId;
 
     /** 分析数据（JSON） */
-    @Column(name = "analysis_data", length = 20000)
+    @TableField("analysis_data")
     private String analysisData;
 
-    @Column(name = "generated_at", nullable = false, updatable = false)
+    @TableField(value = "generated_at", fill = FieldFill.INSERT)
     private LocalDateTime generatedAt;
 
-    @PrePersist
-    public void prePersist() {
-        this.generatedAt = LocalDateTime.now();
     }
-}

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 面试官风格服务实现。
@@ -23,13 +24,13 @@ public class PersonaServiceImpl implements PersonaService {
     @Override
     @Transactional(readOnly = true)
     public List<InterviewerPersona> findAll() {
-        return personaRepository.findAll();
+        return personaRepository.selectList(null);
     }
 
     @Override
     @Transactional(readOnly = true)
     public InterviewerPersona findById(Long id) {
-        return personaRepository.findById(id)
+        return Optional.ofNullable(personaRepository.selectById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("面试官风格不存在: " + id));
     }
 
@@ -41,7 +42,8 @@ public class PersonaServiceImpl implements PersonaService {
         }
         persona.setId(null);
         persona.setIsPreset(false);
-        return personaRepository.save(persona);
+        personaRepository.insert(persona);
+        return persona;
     }
 
     @Override
@@ -54,7 +56,8 @@ public class PersonaServiceImpl implements PersonaService {
         existing.setName(persona.getName());
         existing.setDescription(persona.getDescription());
         existing.setStyleConfig(persona.getStyleConfig());
-        return personaRepository.save(existing);
+        personaRepository.updateById(existing);
+        return existing;
     }
 
     @Override
@@ -64,6 +67,6 @@ public class PersonaServiceImpl implements PersonaService {
         if (Boolean.TRUE.equals(existing.getIsPreset())) {
             throw new BusinessException("预设风格不可删除");
         }
-        personaRepository.delete(existing);
+        personaRepository.deleteById(existing.getId());
     }
 }

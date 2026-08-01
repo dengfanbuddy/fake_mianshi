@@ -41,6 +41,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
@@ -119,7 +120,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         session.setStartedAt(LocalDateTime.now());
         PositionRequirement positionRequirement = positionRequirementService.getByProjectId(projectId);
         session.setPositionRequirementId(positionRequirement == null ? null : positionRequirement.getId());
-        sessionRepository.save(session);
+        sessionRepository.insert(session);
 
         // 4. 生成开场白并作为第一条 INTERVIEWER 消息保存
         String openingMessage = questionGenerationService.generateOpeningMessage(projectId, persona.getId());
@@ -128,7 +129,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         opening.setRole(ROLE_INTERVIEWER);
         opening.setContent(openingMessage);
         opening.setPersonaId(persona.getId());
-        messageRepository.save(opening);
+        messageRepository.insert(opening);
 
         // 5. 生成面试大纲（MVP 不持久化，缓存后放响应返回）
         String outline = questionGenerationService.generateMockInterviewOutline(projectId);
@@ -162,9 +163,8 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         userMessage.setRole(ROLE_CANDIDATE);
         userMessage.setContent(req.getUserText());
         userMessage.setAudioPath(req.getAudioPath());
-        messageRepository.save(userMessage);
-        messageRepository.flush();
-
+        messageRepository.insert(userMessage);
+        
         // 3. 确定当前面试官人设（最新一条 INTERVIEWER 消息的 personaId）
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
 
@@ -185,7 +185,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         aiMessage.setRole(ROLE_INTERVIEWER);
         aiMessage.setContent(cleanReply);
         aiMessage.setPersonaId(persona.getId());
-        messageRepository.save(aiMessage);
+        messageRepository.insert(aiMessage);
 
         MockInterviewRespondResponse response = new MockInterviewRespondResponse();
         response.setUserMessage(userMessage);
@@ -252,12 +252,12 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         summaryMessage.setRole(ROLE_INTERVIEWER);
         summaryMessage.setContent(content);
         summaryMessage.setPersonaId(persona.getId());
-        messageRepository.save(summaryMessage);
+        messageRepository.insert(summaryMessage);
 
         // 4. 会话置为 COMPLETED
         session.setStatus(STATUS_COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
-        sessionRepository.save(session);
+        sessionRepository.updateById(session);
 
         // 自动触发会话分析（在事务提交后执行，失败不阻断收尾）
         triggerAnalysisAfterCommit(sessionId);
@@ -274,7 +274,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     @Override
     @Transactional
     public void switchPersona(Long sessionId, Long newPersonaId) {
-        sessionRepository.findById(sessionId)
+        Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("模拟面试会话不存在: id=" + sessionId));
         InterviewerPersona persona = personaService.findById(newPersonaId);
 
@@ -283,7 +283,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         note.setRole(ROLE_INTERVIEWER);
         note.setContent("面试官已更换为【" + persona.getName() + "】，接下来将按照新面试官的风格提问。");
         note.setPersonaId(persona.getId());
-        messageRepository.save(note);
+        messageRepository.insert(note);
     }
 
     // ---------------- 内部方法 ----------------
@@ -555,7 +555,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
      * 校验会话存在且为 IN_PROGRESS，否则抛业务异常。
      */
     private InterviewSession requireActiveSession(Long sessionId) {
-        InterviewSession session = sessionRepository.findById(sessionId)
+        InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("模拟面试会话不存在: id=" + sessionId));
         if (!STATUS_IN_PROGRESS.equals(session.getStatus())) {
             throw new BusinessException("当前面试会话已结束或不可继续，请重新开始");

@@ -139,7 +139,8 @@ class PositionRequirementControllerTest {
     private Long createProject() {
         InterviewProject project = new InterviewProject();
         project.setName("职位需求测试项目");
-        return projectRepository.save(project).getId();
+        projectRepository.insert(project);
+            return project.getId();
     }
 
     private void saveResumeWithAnalysis(Long projectId, String position, String seniority) {
@@ -155,6 +156,6 @@ class PositionRequirementControllerTest {
                  "suggestedPosition": "%s",
                  "suggestedSeniority": "%s"}
                 """.formatted(position, seniority));
-        resumeRepository.save(resume);
+        resumeRepository.insert(resume);
     }
 }

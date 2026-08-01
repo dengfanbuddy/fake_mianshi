@@ -146,7 +146,8 @@ class ResumeControllerTest {
     private Long createProject() {
         InterviewProject project = new InterviewProject();
         project.setName("简历测试项目");
-        return projectRepository.save(project).getId();
+        projectRepository.insert(project);
+            return project.getId();
     }
 
     /** 用 pdfbox 生成一个含指定文本的 PDF 字节流 */

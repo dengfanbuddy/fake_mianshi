@@ -1,12 +1,14 @@
 package com.fakemianshi;
 
 import com.fakemianshi.util.StartupInitializer;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
+@MapperScan("com.fakemianshi.repository")
 public class FakeMianshiBackendApplication {
 
 	public static void main(String[] args) {

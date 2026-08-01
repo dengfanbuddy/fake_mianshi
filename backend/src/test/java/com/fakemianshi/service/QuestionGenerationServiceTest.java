@@ -57,8 +57,8 @@ class QuestionGenerationServiceTest {
                 interviewerPersonaRepository);
 
         // save 直接返回传入对象，模拟 JPA 行为
-        when(writtenTestQuestionRepository.save(any(WrittenTestQuestion.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(writtenTestQuestionRepository.insert(any(WrittenTestQuestion.class)))
+                .thenAnswer(invocation -> 1);
     }
 
     private void stubContext() {
@@ -116,7 +116,7 @@ class QuestionGenerationServiceTest {
         assertTrue(questions.get(0).getKnowledgePoints().contains("JVM"));
         // 全部保存到 repository
         verify(writtenTestQuestionRepository, org.mockito.Mockito.times(4))
-                .save(any(WrittenTestQuestion.class));
+                .insert(any(WrittenTestQuestion.class));
     }
 
     @Test
@@ -143,7 +143,7 @@ class QuestionGenerationServiceTest {
                 () -> service.generateWrittenTestQuestions(10L, 1L, 4));
         assertEquals("题目生成格式异常，请重试", ex.getMessage());
         // 解析失败不保存任何题目
-        verify(writtenTestQuestionRepository, never()).save(any(WrittenTestQuestion.class));
+        verify(writtenTestQuestionRepository, never()).insert(any(WrittenTestQuestion.class));
     }
 
     @Test
@@ -174,7 +174,7 @@ class QuestionGenerationServiceTest {
         InterviewerPersona persona = new InterviewerPersona();
         persona.setName("张面试官");
         persona.setDescription("严肃专业");
-        when(interviewerPersonaRepository.findById(7L)).thenReturn(Optional.of(persona));
+        when(interviewerPersonaRepository.selectById(7L)).thenReturn(persona);
         when(llmService.chat(anyString(), anyString()))
                 .thenReturn(new LlmResponse("你好，我是张面试官，我们开始吧。", "stop", 20));
 
@@ -185,7 +185,7 @@ class QuestionGenerationServiceTest {
 
     @Test
     void generateOpeningMessage_shouldThrow_whenPersonaNotFound() {
-        when(interviewerPersonaRepository.findById(999L)).thenReturn(Optional.empty());
+        when(interviewerPersonaRepository.selectById(999L)).thenReturn(null);
 
         assertThrows(BusinessException.class,
                 () -> service.generateOpeningMessage(1L, 999L));
