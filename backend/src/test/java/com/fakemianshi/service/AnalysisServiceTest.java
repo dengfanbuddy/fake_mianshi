@@ -231,7 +231,7 @@ class AnalysisServiceTest {
         when(writtenTestAnswerRepository.findBySessionId(3L)).thenReturn(List.of(a1));
 
         String llmJson = """
-                {"overallScore":65,"overallLevel":"中级工程师","expectedSalaryRange":"18k-25k","strengths":["基础较稳"],"weaknesses":["并发理解浅"],"knowledgeGaps":[{"point":"AQS原理","explanation":"AQS基于volatile state和CLH队列，支持独占/共享两种模式，ReentrantLock依赖它实现重入与公平锁。"}],"personalitySummary":"表达谨慎、逻辑尚可，遇到不熟的问题容易绕弯。","characterTraits":["谨慎","条理清晰"],"characterDefects":[{"defect":"不熟的问题易绕弯","improvement":"先直接说不知道，再给部分理解与思路"}],"improvementPlan":{"topics":[{"topic":"并发编程","action":"精读AQS源码并画时序图","example":"以ReentrantLock加锁为例，画出acquire队列流转"}],"suggestions":["每周一道并发题"]},"questionAnalyses":[{"questionContent":"单选：synchronized 和 ReentrantLock 的区别？","answerContent":"B","category":"并发","difficulty":"中级","focusPoint":"考察锁机制与AQS的理解","accuracy":3,"depth":0,"clarity":0,"fluency":0,"tone":"","answerApproach":"先答两者本质（内置锁vs显式锁），再从可中断/公平/超时/条件队列展开","example":"synchronized是JVM内置锁，ReentrantLock基于AQS支持中断、超时与公平策略…","improvementSuggestion":"补充AQS与锁升级知识"}]}
+                {"overallScore":65,"overallLevel":"中级工程师","expectedSalaryRange":"18k-25k","strengths":["基础较稳"],"weaknesses":["并发理解浅"],"knowledgeGaps":[{"point":"AQS原理","explanation":"AQS基于volatile state和CLH队列，支持独占/共享两种模式，ReentrantLock依赖它实现重入与公平锁。"}],"personalitySummary":"表达谨慎、逻辑尚可，遇到不熟的问题容易绕弯。","characterTraits":["谨慎","条理清晰"],"characterDefects":[{"defect":"不熟的问题易绕弯","improvement":"先直接说不知道，再给部分理解与思路"}],"improvementPlan":{"topics":[{"topic":"并发编程","action":"精读AQS源码并画时序图","example":"以ReentrantLock加锁为例，画出acquire队列流转"}],"suggestions":["每周一道并发题"]},"questionAnalyses":[{"questionContent":"单选：synchronized 和 ReentrantLock 的区别？","answerContent":"B","category":"并发","difficulty":"中级","focusPoint":"考察锁机制与AQS的理解","accuracy":3,"accuracyReason":"选错了答案，混淆了公平锁与可重入概念，准确性不足","depth":0,"depthReason":"客观题无展开，深度不评分","clarity":0,"clarityReason":"客观题无表达，清晰度不评分","fluency":0,"fluencyReason":"客观题无口语表达，流畅度不评分","tone":"","answerApproach":"先答两者本质（内置锁vs显式锁），再从可中断/公平/超时/条件队列展开","example":"synchronized是JVM内置锁，ReentrantLock基于AQS支持中断、超时与公平策略…","improvementSuggestion":"补充AQS与锁升级知识"}]}
                 """;
         when(llmService.chat(anyString(), anyString())).thenReturn(new LlmResponse(llmJson, "stop", 100));
 
@@ -257,6 +257,10 @@ class AnalysisServiceTest {
         assertTrue(qa.getFocusPoint().contains("锁机制"));
         assertTrue(qa.getAnswerApproach().contains("先答两者本质"));
         assertTrue(qa.getExample().contains("synchronized是JVM内置锁"));
+        // 打分依据
+        assertTrue(qa.getAccuracyReason().contains("选错了答案"));
+        assertTrue(qa.getDepthReason().contains("客观题无展开"));
+        assertEquals(3.0, qa.getAccuracy());
     }
 
     @Test
@@ -283,6 +287,7 @@ class AnalysisServiceTest {
         qa.setQuestionContent("请解释 volatile");
         qa.setAnswerContent("可见性与有序性");
         qa.setAccuracy(7.0);
+        qa.setAccuracyReason("答出核心语义但未举例说明");
         qa.setCategory("并发");
         qa.setDifficulty("中级");
         qa.setFocusPoint("考察内存模型理解");
@@ -303,6 +308,7 @@ class AnalysisServiceTest {
         assertEquals("中级", qaMap.get("difficulty"));
         assertEquals("先答定义再举例", qaMap.get("answerApproach"));
         assertEquals("示例内容", qaMap.get("example"));
+        assertEquals("答出核心语义但未举例说明", qaMap.get("accuracyReason"));
         // knowledgeGaps 为对象列表
         assertEquals(1, dto.getKnowledgeGaps().size());
     }

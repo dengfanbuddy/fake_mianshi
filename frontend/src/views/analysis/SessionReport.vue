@@ -34,10 +34,10 @@ const projectId = ref(resolveProjectId())
 
 const MAX_PREVIEW = 200
 const DIMENSIONS = [
-  { key: 'accuracy', label: '准确性' },
-  { key: 'depth', label: '深度' },
-  { key: 'clarity', label: '清晰度' },
-  { key: 'fluency', label: '流畅度' },
+  { key: 'accuracy', reasonKey: 'accuracyReason', label: '准确性' },
+  { key: 'depth', reasonKey: 'depthReason', label: '深度' },
+  { key: 'clarity', reasonKey: 'clarityReason', label: '清晰度' },
+  { key: 'fluency', reasonKey: 'fluencyReason', label: '流畅度' },
 ]
 
 // ---------- 派生数据 ----------
@@ -51,6 +51,9 @@ const displayScore = computed(() => {
 
 const questionAnalyses = computed(() => analysis.value?.questionAnalyses || [])
 const writtenResults = computed(() => written.value?.results || [])
+
+// 该题有打分依据的维度列表
+const dimsWithReasons = (qa) => DIMENSIONS.filter((d) => qa && qa[d.reasonKey])
 
 // 单题分析 + 笔试原始记录按顺序对齐
 const mergedQuestions = computed(() => {
@@ -500,7 +503,7 @@ onMounted(fetchAll)
                   </el-button>
                 </div>
 
-                <!-- 各维度评分 -->
+                <!-- 各维度评分（附打分依据） -->
                 <div v-if="q.analysis" class="dims">
                   <div v-for="d in DIMENSIONS" :key="d.key" class="dim-row">
                     <span class="dim-name">{{ d.label }}</span>
@@ -514,6 +517,12 @@ onMounted(fetchAll)
                     <span class="dim-score" :style="{ color: dimColor(q.analysis[d.key]) }">
                       {{ Number(q.analysis[d.key]) || 0 }}/10
                     </span>
+                  </div>
+                  <div v-if="dimsWithReasons(q.analysis).length" class="dim-reasons">
+                    <div v-for="d in dimsWithReasons(q.analysis)" :key="d.key" class="dim-reason">
+                      <span class="dim-reason-label">{{ d.label }}：</span>
+                      <span class="dim-reason-text">{{ q.analysis[d.reasonKey] }}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1103,6 +1112,28 @@ onMounted(fetchAll)
   text-align: right;
   font-size: 12px;
   font-weight: 600;
+}
+.dim-reasons {
+  margin-top: 6px;
+  border-top: 1px dashed #e4e7ed;
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dim-reason {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+}
+.dim-reason-label {
+  font-weight: 600;
+  color: #409eff;
+  flex-shrink: 0;
+}
+.dim-reason-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .written-divider {

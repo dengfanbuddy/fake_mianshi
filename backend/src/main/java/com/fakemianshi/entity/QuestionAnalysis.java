@@ -34,14 +34,30 @@ public class QuestionAnalysis {
     /** 准确度评分（0-100） */
     private Double accuracy;
 
+    /** 准确度评分依据 */
+    @Column(name = "accuracy_reason", length = 1000)
+    private String accuracyReason;
+
     /** 深度评分（0-100） */
     private Double depth;
+
+    /** 深度评分依据 */
+    @Column(name = "depth_reason", length = 1000)
+    private String depthReason;
 
     /** 清晰度评分（0-100） */
     private Double clarity;
 
+    /** 清晰度评分依据 */
+    @Column(name = "clarity_reason", length = 1000)
+    private String clarityReason;
+
     /** 流畅度评分（0-100） */
     private Double fluency;
+
+    /** 流畅度评分依据 */
+    @Column(name = "fluency_reason", length = 1000)
+    private String fluencyReason;
 
     /** 语气/态度评价 */
     @Column(name = "tone_evaluation")

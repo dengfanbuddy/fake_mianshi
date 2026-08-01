@@ -66,9 +66,10 @@ public class AnalysisServiceImpl implements AnalysisService {
             5. improvementPlan.topics 每项给出 {topic: 学习方向, action: 具体做法, example: 实例}，suggestions 给出可执行建议；
             6. 根据面试表现给出 overallLevel（能力等级：初级/中级/高级/资深/专家 工程师）与 expectedSalaryRange（按国内一线城市行情给出合理月薪区间，如 "20k-30k"）；
             7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
-            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）。
+            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）；
+            9. 每个评分维度都要给出打分依据：accuracyReason/depthReason/clarityReason/fluencyReason（各 30-80 字，具体指出回答中得分点和扣分点，如"答案正确但未展开锁升级细节，故深度不足"，让候选人明白为什么是这个分数）。
             请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
-            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0,"tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
+            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"accuracyReason":"依据","depth":0-10,"depthReason":"依据","clarity":0-10,"clarityReason":"依据","fluency":0-10,"fluencyReason":"依据","tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一道笔试题，questionContent 请原样引用题目内容，便于程序匹配；
             - 客观题 fluency 填 0，tone 填简短语气评价或空字符串；
@@ -86,9 +87,10 @@ public class AnalysisServiceImpl implements AnalysisService {
             5. improvementPlan.topics 每项给出 {topic: 学习方向, action: 具体做法, example: 实例}，suggestions 给出可执行建议；
             6. 根据面试表现给出 overallLevel（能力等级：初级/中级/高级/资深/专家 工程师）与 expectedSalaryRange（按国内一线城市行情给出合理月薪区间，如 "20k-30k"）；
             7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
-            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）。
+            8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）；
+            9. 每个评分维度都要给出打分依据：accuracyReason/depthReason/clarityReason/fluencyReason（各 30-80 字，具体指出回答中得分点和扣分点，如"答案正确但未展开锁升级细节，故深度不足"，让候选人明白为什么是这个分数）。
             请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
-            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"communicationEvaluation":"...","improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"depth":0-10,"clarity":0-10,"fluency":0-10,"tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
+            {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"communicationEvaluation":"...","improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"accuracyReason":"依据","depth":0-10,"depthReason":"依据","clarity":0-10,"clarityReason":"依据","fluency":0-10,"fluencyReason":"依据","tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一轮问答，questionContent 请引用面试官的原问题；
             - accuracy/depth/clarity/fluency 均按 0-10 打分。
@@ -245,9 +247,13 @@ public class AnalysisServiceImpl implements AnalysisService {
             map.put("questionContent", qa.getQuestionContent());
             map.put("answerContent", qa.getAnswerContent());
             map.put("accuracy", qa.getAccuracy());
+            map.put("accuracyReason", qa.getAccuracyReason());
             map.put("depth", qa.getDepth());
+            map.put("depthReason", qa.getDepthReason());
             map.put("clarity", qa.getClarity());
+            map.put("clarityReason", qa.getClarityReason());
             map.put("fluency", qa.getFluency());
+            map.put("fluencyReason", qa.getFluencyReason());
             map.put("tone", qa.getToneEvaluation());
             map.put("category", qa.getCategory());
             map.put("difficulty", qa.getDifficulty());
@@ -400,9 +406,13 @@ public class AnalysisServiceImpl implements AnalysisService {
             qa.setQuestionContent(item.path("questionContent").asText());
             qa.setAnswerContent(item.path("answerContent").asText());
             qa.setAccuracy(numericOrNull(item, "accuracy"));
+            qa.setAccuracyReason(textOrNull(item, "accuracyReason"));
             qa.setDepth(numericOrNull(item, "depth"));
+            qa.setDepthReason(textOrNull(item, "depthReason"));
             qa.setClarity(numericOrNull(item, "clarity"));
+            qa.setClarityReason(textOrNull(item, "clarityReason"));
             qa.setFluency(numericOrNull(item, "fluency"));
+            qa.setFluencyReason(textOrNull(item, "fluencyReason"));
             qa.setToneEvaluation(textOrNull(item, "tone"));
             qa.setCategory(textOrNull(item, "category"));
             qa.setDifficulty(textOrNull(item, "difficulty"));
