@@ -84,4 +84,49 @@ public class AudioStorageUtil {
         }
         return new FileSystemResource(path);
     }
+
+    /**
+     * 删除某会话的全部录音（{@code {audioDir}/{sessionId}} 目录），用于删除面试/项目时清理磁盘。
+     *
+     * @param sessionId 面试会话 ID
+     */
+    public void deleteSessionAudio(Long sessionId) {
+        if (sessionId == null) {
+            return;
+        }
+        Path dir = Paths.get(audioDir).resolve(String.valueOf(sessionId)).toAbsolutePath().normalize();
+        try {
+            if (Files.isDirectory(dir)) {
+                try (var stream = Files.walk(dir)) {
+                    stream.sorted(java.util.Comparator.reverseOrder())
+                            .forEach(p -> {
+                                try {
+                                    Files.deleteIfExists(p);
+                                } catch (IOException ignored) {
+                                    // 单个文件删除失败不阻断整体
+                                }
+                            });
+                }
+            }
+        } catch (IOException e) {
+            // 目录不存在或删除失败时静默忽略，避免影响业务主流程
+        }
+    }
+
+    /**
+     * 将相对路径（如 {@code 5/candidate_20260802010000.wav}）转换为可回放的 URL 相对路径。
+     */
+    public String toPlayablePath(String storedPath) {
+        if (storedPath == null || storedPath.isBlank()) {
+            return null;
+        }
+        Path root = Paths.get(audioDir).toAbsolutePath().normalize();
+        Path path = Paths.get(storedPath);
+        Path normalized = path.isAbsolute() ? path.normalize() : root.resolve(path).normalize();
+        // 相对 audioDir 的路径（正斜杠），供前端 /api/voice/audio/ 拼接
+        if (normalized.startsWith(root)) {
+            return root.relativize(normalized).toString().replace('\\', '/');
+        }
+        return storedPath;
+    }
 }

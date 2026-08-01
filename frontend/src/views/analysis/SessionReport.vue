@@ -290,6 +290,24 @@ function goBack() {
   else router.push('/')
 }
 
+// 回放对话录音
+let replayAudio = null
+function playReplay(audioPath) {
+  if (!audioPath) return
+  if (replayAudio) {
+    replayAudio.pause()
+    replayAudio = null
+  }
+  const audio = new Audio(`/api/voice/audio/${audioPath}`)
+  replayAudio = audio
+  audio.onended = () => {
+    replayAudio = null
+  }
+  audio.play().catch(() => {
+    replayAudio = null
+  })
+}
+
 onMounted(fetchAll)
 </script>
 
@@ -639,6 +657,7 @@ onMounted(fetchAll)
                   <div class="replay-text">{{ m.content }}</div>
                   <div class="replay-meta">
                     <span class="replay-role">{{ m.role === 'CANDIDATE' ? '候选人' : '面试官' }}</span>
+                    <button v-if="m.audioPath" class="replay-play" @click="playReplay(m.audioPath)">🔊 回放</button>
                     <span class="replay-time">{{ formatDateTime(m.createdAt) }}</span>
                   </div>
                 </div>
@@ -1275,6 +1294,17 @@ onMounted(fetchAll)
   justify-content: space-between;
   gap: 12px;
   font-size: 11px;
+}
+.replay-play {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: #409eff;
+  padding: 0;
+}
+.replay-play:hover {
+  text-decoration: underline;
 }
 .bub-interviewer .replay-meta {
   color: rgba(255, 255, 255, 0.6);

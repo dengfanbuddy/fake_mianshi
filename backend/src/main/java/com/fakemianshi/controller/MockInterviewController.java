@@ -1,5 +1,6 @@
 package com.fakemianshi.controller;
 
+import com.fakemianshi.config.BusinessException;
 import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.dto.MockInterviewRespondRequest;
 import com.fakemianshi.dto.MockInterviewRespondResponse;
@@ -7,6 +8,7 @@ import com.fakemianshi.dto.MockInterviewStartRequest;
 import com.fakemianshi.dto.MockInterviewStartResponse;
 import com.fakemianshi.entity.MockInterviewMessage;
 import com.fakemianshi.service.MockInterviewService;
+import com.fakemianshi.util.AudioStorageUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,8 +16,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -29,6 +34,7 @@ import java.util.List;
 public class MockInterviewController {
 
     private final MockInterviewService mockInterviewService;
+    private final AudioStorageUtil audioStorageUtil;
 
     /** 开始模拟面试：创建会话、生成开场白与大纲 */
     @PostMapping("/start/{projectId}")
@@ -62,6 +68,23 @@ public class MockInterviewController {
                                            @RequestBody SwitchPersonaRequest req) {
         mockInterviewService.switchPersona(sessionId, req.newPersonaId());
         return ApiResponse.success(null);
+    }
+
+    /** 上传候选人录音（wav），保存后返回可回放的相对路径（供 respond 写入消息 audioPath） */
+    @PostMapping("/{sessionId}/audio")
+    public ApiResponse<String> uploadAudio(@PathVariable Long sessionId,
+                                           @RequestParam("file") MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("录音文件为空");
+        }
+        byte[] data;
+        try {
+            data = file.getBytes();
+        } catch (IOException e) {
+            throw new BusinessException("录音读取失败: " + e.getMessage(), e);
+        }
+        String absolutePath = audioStorageUtil.saveAudio(data, sessionId, "candidate");
+        return ApiResponse.success(audioStorageUtil.toPlayablePath(absolutePath));
     }
 
     /** 切换人设请求体 */

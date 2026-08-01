@@ -7,14 +7,9 @@ import com.fakemianshi.entity.InterviewSession;
 import com.fakemianshi.repository.HistoricalAnalysisRepository;
 import com.fakemianshi.repository.InterviewProjectRepository;
 import com.fakemianshi.repository.InterviewSessionRepository;
-import com.fakemianshi.repository.MockInterviewMessageRepository;
 import com.fakemianshi.repository.PositionRequirementRepository;
-import com.fakemianshi.repository.QuestionAnalysisRepository;
 import com.fakemianshi.repository.ResumeRepository;
-import com.fakemianshi.repository.SessionAnalysisRepository;
 import com.fakemianshi.repository.WeaknessTagRepository;
-import com.fakemianshi.repository.WrittenTestAnswerRepository;
-import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.ProjectService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -34,14 +29,10 @@ public class ProjectServiceImpl implements ProjectService {
     private final InterviewProjectRepository projectRepository;
     private final ResumeRepository resumeRepository;
     private final InterviewSessionRepository sessionRepository;
-    private final WrittenTestQuestionRepository writtenTestQuestionRepository;
-    private final WrittenTestAnswerRepository writtenTestAnswerRepository;
-    private final MockInterviewMessageRepository mockInterviewMessageRepository;
-    private final SessionAnalysisRepository sessionAnalysisRepository;
-    private final QuestionAnalysisRepository questionAnalysisRepository;
     private final WeaknessTagRepository weaknessTagRepository;
     private final HistoricalAnalysisRepository historicalAnalysisRepository;
     private final PositionRequirementRepository positionRequirementRepository;
+    private final SessionCleanupService sessionCleanupService;
 
     @Override
     @Transactional(readOnly = true)
@@ -80,18 +71,10 @@ public class ProjectServiceImpl implements ProjectService {
     public void delete(Long id) {
         InterviewProject project = findById(id);
 
-        // 先删除会话及其子数据，再删除项目
+        // 先删除会话及其子数据、录音文件，再删除项目
         List<InterviewSession> sessions = sessionRepository.findByProjectIdOrderByCreatedAtDesc(id);
         for (InterviewSession session : sessions) {
-            Long sessionId = session.getId();
-            writtenTestAnswerRepository.deleteAll(writtenTestAnswerRepository.findBySessionId(sessionId));
-            writtenTestQuestionRepository.deleteAll(
-                    writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(sessionId));
-            mockInterviewMessageRepository.deleteAll(
-                    mockInterviewMessageRepository.findBySessionIdOrderByCreatedAt(sessionId));
-            sessionAnalysisRepository.deleteAll(sessionAnalysisRepository.findBySessionId(sessionId));
-            questionAnalysisRepository.deleteAll(questionAnalysisRepository.findBySessionId(sessionId));
-            sessionRepository.delete(session);
+            sessionCleanupService.deleteSession(session.getId());
         }
 
         resumeRepository.deleteAll(resumeRepository.findByProjectId(id));

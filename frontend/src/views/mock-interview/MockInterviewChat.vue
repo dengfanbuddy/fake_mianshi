@@ -11,7 +11,7 @@ import {
   switchPersona,
   getPersonaList,
 } from '../../api/mock-interview'
-import { recognizeSpeech, synthesizeSpeech } from '../../api/voice'
+import { recognizeSpeech, synthesizeSpeech, uploadAudio } from '../../api/voice'
 import { blobToWav } from '../../utils/audio'
 
 const route = useRoute()
@@ -196,7 +196,7 @@ function sendText() {
   doSend(text)
 }
 
-// 语音录音结束 → STT → respond
+// 语音录音结束 → STT → 保存录音 → respond
 async function handleRecorded(blob) {
   if (sending.value || recognizing.value || ended.value) return
   recognizing.value = true
@@ -210,26 +210,35 @@ async function handleRecorded(blob) {
       ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
       return
     }
-    doSend(text)
+    // 保存录音供后续回听（失败不阻断对话，仅提示）
+    let audioPath = null
+    try {
+      const up = await uploadAudio(sessionId.value, wavBlob)
+      audioPath = up?.data || null
+    } catch (e) {
+      ElMessage.warning('录音保存失败，本次回答将无语音回放')
+    }
+    doSend(text, audioPath)
   } catch (e) {
     recognizing.value = false
     ElMessage.error(`语音识别失败：${e.message || '未知错误'}，请改用文字输入`)
   }
 }
 
-async function doSend(text) {
+async function doSend(text, audioPath = null) {
   if (!sessionId.value) return
   // 乐观插入候选人消息，即时反馈
   const optimistic = {
     id: null,
     role: 'CANDIDATE',
     content: text,
+    audioPath,
     createdAt: new Date(),
   }
   messages.value.push(optimistic)
   sending.value = true
   try {
-    const res = await respondMockInterview(sessionId.value, { userText: text })
+    const res = await respondMockInterview(sessionId.value, { userText: text, audioPath })
     const data = res?.data
     if (!data?.aiMessage) {
       ElMessage.error(res?.message || '面试官回复失败')

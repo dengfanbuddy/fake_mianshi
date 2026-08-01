@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import { getProject, updateProject, deleteProject } from '../api/project'
 import { getResume, uploadResume, analyzeResume } from '../api/resume'
 import { getPosition, savePosition, generatePositionFromResume } from '../api/position'
-import { getSessionsByProject } from '../api/session'
+import { getSessionsByProject, deleteSession } from '../api/session'
 import { getWeaknessTags } from '../api/weakness'
 
 const route = useRoute()
@@ -328,6 +328,20 @@ async function fetchSessions() {
   }
 }
 
+async function handleDeleteSession(sessionId) {
+  try {
+    const res = await deleteSession(sessionId)
+    if (res.code === 200) {
+      ElMessage.success('面试已删除（含录音）')
+      await fetchSessions()
+    } else {
+      ElMessage.error(res.message || '删除失败')
+    }
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
 function viewReport(sessionId) {
   router.push({ path: `/analysis/session/${sessionId}`, query: { projectId } })
 }
@@ -635,9 +649,19 @@ onMounted(() => {
           <el-table-column label="完成时间" min-width="170">
             <template #default="{ row }">{{ formatTime(row.completedAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="120">
+          <el-table-column label="操作" width="160">
             <template #default="{ row }">
               <el-button type="primary" link @click="viewReport(row.id)">查看报告</el-button>
+              <el-popconfirm
+                title="删除该面试及其录音？"
+                confirm-button-text="删除"
+                cancel-button-text="取消"
+                @confirm="handleDeleteSession(row.id)"
+              >
+                <template #reference>
+                  <el-button type="danger" link>删除</el-button>
+                </template>
+              </el-popconfirm>
             </template>
           </el-table-column>
         </el-table>

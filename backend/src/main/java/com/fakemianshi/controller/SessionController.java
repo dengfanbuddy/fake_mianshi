@@ -4,7 +4,9 @@ import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.entity.InterviewSession;
 import com.fakemianshi.repository.InterviewProjectRepository;
 import com.fakemianshi.repository.InterviewSessionRepository;
+import com.fakemianshi.service.impl.SessionCleanupService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,6 +27,7 @@ public class SessionController {
 
     private final InterviewSessionRepository sessionRepository;
     private final InterviewProjectRepository projectRepository;
+    private final SessionCleanupService sessionCleanupService;
 
     /** 查询某项目下的全部会话，按创建时间倒序 */
     @GetMapping("/project/{projectId}")
@@ -37,6 +40,13 @@ public class SessionController {
     @GetMapping("/{sessionId}")
     public ApiResponse<InterviewSession> get(@PathVariable Long sessionId) {
         return ApiResponse.success(sessionRepository.findById(sessionId).orElse(null));
+    }
+
+    /** 删除单个会话及其子数据、录音文件 */
+    @DeleteMapping("/{sessionId}")
+    public ApiResponse<Void> delete(@PathVariable Long sessionId) {
+        sessionCleanupService.deleteSession(sessionId);
+        return ApiResponse.success(null);
     }
 
     /** 看板统计：项目数、会话数（笔试/面试） */

@@ -9,3 +9,6 @@ export const getSessionInfo = (sessionId) => request.get(`/session/${sessionId}`
 
 // 看板统计：项目数 / 会话数 / 笔试数 / 面试数
 export const getDashboardStats = () => request.get('/session/stats')
+
+// 删除单个会话（含子数据与录音文件）
+export const deleteSession = (sessionId) => request.delete(`/session/${sessionId}`)

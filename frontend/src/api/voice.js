@@ -20,3 +20,12 @@ export const synthesizeSpeech = async (text, voiceType) => {
 
 // 腾讯云语音密钥配置状态（不暴露密钥本身）
 export const getVoiceStatus = () => request.get('/voice/status')
+
+// 保存候选人录音（wav），返回可回放的相对路径（用于消息 audioPath）
+export const uploadAudio = (sessionId, audioBlob) => {
+  const formData = new FormData()
+  formData.append('file', audioBlob, 'recording.wav')
+  return request.post(`/mock-interview/${sessionId}/audio`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
