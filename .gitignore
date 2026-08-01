@@ -1,5 +1,8 @@
 node_modules/
 dist/
+dist-check/
+dist-build-check/
+dist-verify/
 *.log
 target/
 uploads/
