@@ -16,6 +16,8 @@ import com.fakemianshi.repository.WeaknessTagRepository;
 import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.AnalysisService;
+import com.fakemianshi.service.VoiceService;
+import com.fakemianshi.util.AudioStorageUtil;
 import com.fakemianshi.service.impl.MockInterviewServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,7 +87,8 @@ class MockInterviewServiceTest {
                 projectService, personaService, positionRequirementService, resumeService,
                 sessionRepository, messageRepository, writtenTestAnswerRepository,
                 writtenTestQuestionRepository, weaknessTagRepository,
-                questionGenerationService, llmService, analysisService);
+                questionGenerationService, llmService, analysisService,
+                mock(VoiceService.class), mock(AudioStorageUtil.class));
 
         // 预设人设
         InterviewerPersona persona = new InterviewerPersona();

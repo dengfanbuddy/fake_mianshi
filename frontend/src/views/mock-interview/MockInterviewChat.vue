@@ -256,7 +256,12 @@ async function doSend(text, audioPath = null) {
       ended.value = true
       handleInterviewEnded()
     } else if (autoTts.value) {
-      speak(aiContent)
+      // 优先播放后端已合成保存的面试官语音；无音频时即时 TTS 合成
+      if (data.aiMessage.audioPath) {
+        playReplay(data.aiMessage.audioPath)
+      } else {
+        speak(aiContent)
+      }
     }
 
     // 面试官建议换人：根据回答情况推荐更合适的风格，弹窗由候选人确认

@@ -20,6 +20,8 @@ import com.fakemianshi.repository.WeaknessTagRepository;
 import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.AnalysisService;
+import com.fakemianshi.service.VoiceService;
+import com.fakemianshi.util.AudioStorageUtil;
 import com.fakemianshi.service.LlmService;
 import com.fakemianshi.service.MockInterviewService;
 import com.fakemianshi.service.PersonaService;
@@ -96,6 +98,8 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final QuestionGenerationService questionGenerationService;
     private final LlmService llmService;
     private final AnalysisService analysisService;
+    private final VoiceService voiceService;
+    private final AudioStorageUtil audioStorageUtil;
 
     /** 会话 -> 面试大纲（JSON），MVP 不持久化 */
     private final ConcurrentHashMap<Long, String> outlineCache = new ConcurrentHashMap<>();
@@ -122,13 +126,14 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         session.setPositionRequirementId(positionRequirement == null ? null : positionRequirement.getId());
         sessionRepository.insert(session);
 
-        // 4. 生成开场白并作为第一条 INTERVIEWER 消息保存
+        // 4. 生成开场白并作为第一条 INTERVIEWER 消息保存（同时合成并保存面试官语音）
         String openingMessage = questionGenerationService.generateOpeningMessage(projectId, persona.getId());
         MockInterviewMessage opening = new MockInterviewMessage();
         opening.setSessionId(session.getId());
         opening.setRole(ROLE_INTERVIEWER);
         opening.setContent(openingMessage);
         opening.setPersonaId(persona.getId());
+        opening.setAudioPath(saveInterviewerAudio(openingMessage, session.getId(), persona));
         messageRepository.insert(opening);
 
         // 5. 生成面试大纲（MVP 不持久化，缓存后放响应返回）
@@ -179,12 +184,15 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         Long suggestedPersonaId = parseAndStripSwitchSuggestion(replyBuilder, persona);
         String cleanReply = replyBuilder.toString().trim();
 
-        // 5. 保存面试官消息
+        // 5. 保存面试官消息（同时合成并保存面试官语音，失败不阻断面试）
         MockInterviewMessage aiMessage = new MockInterviewMessage();
         aiMessage.setSessionId(sessionId);
         aiMessage.setRole(ROLE_INTERVIEWER);
         aiMessage.setContent(cleanReply);
         aiMessage.setPersonaId(persona.getId());
+        if (!cleanReply.startsWith("【面试结束】")) {
+            aiMessage.setAudioPath(saveInterviewerAudio(cleanReply, sessionId, persona));
+        }
         messageRepository.insert(aiMessage);
 
         MockInterviewRespondResponse response = new MockInterviewRespondResponse();
@@ -192,6 +200,29 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         response.setAiMessage(aiMessage);
         response.setSuggestedPersonaId(suggestedPersonaId);
         return response;
+    }
+
+    /**
+     * 合成并保存面试官语音：调用 TTS 生成音频，存入会话录音目录并返回可回放相对路径。
+     * TTS 失败（密钥未配置/超长/服务异常）时返回 null，不阻断面试流程。
+     */
+    private String saveInterviewerAudio(String text, Long sessionId, InterviewerPersona persona) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        // 腾讯 TTS 单次约 150 字上限，超长截断
+        String ttsText = text.length() > 150 ? text.substring(0, 150) : text;
+        try {
+            byte[] audio = voiceService.synthesizeSpeech(ttsText, persona == null ? null : persona.getStyleConfig());
+            if (audio == null || audio.length == 0) {
+                return null;
+            }
+            String absolute = audioStorageUtil.saveAudio(audio, sessionId, "interviewer");
+            return audioStorageUtil.toPlayablePath(absolute);
+        } catch (Exception e) {
+            // 语音不可用时静默降级：消息仍正常保存与展示
+            return null;
+        }
     }
 
     /**
