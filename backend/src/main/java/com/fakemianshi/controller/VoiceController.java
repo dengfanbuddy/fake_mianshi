@@ -1,6 +1,7 @@
 package com.fakemianshi.controller;
 
 import com.fakemianshi.config.BusinessException;
+import com.fakemianshi.config.TencentCloudProperties;
 import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.dto.TtsRequest;
 import com.fakemianshi.service.VoiceService;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * 语音接口。
@@ -35,9 +37,18 @@ public class VoiceController {
 
     private final VoiceService voiceService;
     private final AudioStorageUtil audioStorageUtil;
+    private final TencentCloudProperties tencentCloudProperties;
+
+    /** 腾讯云语音密钥配置状态（供前端展示，不暴露密钥本身） */
+    @GetMapping("/status")
+    public ApiResponse<Map<String, Object>> status() {
+        return ApiResponse.success(Map.of(
+                "configured", tencentCloudProperties.isConfigured(),
+                "appIdConfigured", tencentCloudProperties.getAppId() != null
+                        && !tencentCloudProperties.getAppId().isBlank()));
+    }
 
     /** 语音识别（STT）：上传音频，返回识别文本 */
-    @PostMapping("/stt")
     public ApiResponse<String> stt(@RequestParam("file") MultipartFile file) {
         byte[] audioData;
         try {

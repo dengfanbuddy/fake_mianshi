@@ -8,6 +8,23 @@ import {
   updatePersona,
   deletePersona,
 } from '../api/persona'
+import { getVoiceStatus } from '../api/voice'
+
+/* ---------------- 腾讯云语音配置状态 ---------------- */
+const voiceConfigured = ref(null) // null=加载中, true/false
+const appIdConfigured = ref(false)
+
+async function fetchVoiceStatus() {
+  try {
+    const res = await getVoiceStatus()
+    if (res.code === 200 && res.data) {
+      voiceConfigured.value = !!res.data.configured
+      appIdConfigured.value = !!res.data.appIdConfigured
+    }
+  } catch (e) {
+    // 拦截器已提示；加载失败保持 null
+  }
+}
 
 /* ---------------- AI 模型配置 ---------------- */
 const configs = ref([])
@@ -192,6 +209,7 @@ async function handleDeletePersona(row) {
 onMounted(() => {
   fetchConfigs()
   fetchPersonas()
+  fetchVoiceStatus()
 })
 </script>
 
@@ -246,8 +264,19 @@ onMounted(() => {
         <div>语音识别（STT）与语音合成（TTS）依赖腾讯云密钥，密钥通过后端环境变量配置：</div>
         <div class="code-line">TENCENT_SECRET_ID / TENCENT_SECRET_KEY / TENCENT_APP_ID</div>
         <div>
-          状态：<el-tag type="warning" size="small" effect="plain">未配置</el-tag>
-          <span class="hint">请在 backend 环境变量中配置腾讯云密钥后重启后端服务。</span>
+          状态：
+          <el-tag v-if="voiceConfigured === null" type="info" size="small" effect="plain">检测中…</el-tag>
+          <el-tag v-else-if="voiceConfigured" type="success" size="small" effect="dark">已配置</el-tag>
+          <el-tag v-else type="warning" size="small" effect="plain">未配置</el-tag>
+          <span class="hint" v-if="voiceConfigured === false">
+            请在后端环境变量中配置 TENCENT_SECRET_ID / TENCENT_SECRET_KEY 后重启后端服务。
+          </span>
+          <span class="hint" v-else-if="voiceConfigured">
+            STT / TTS 已可用。
+          </span>
+        </div>
+        <div class="hint" v-if="voiceConfigured && !appIdConfigured">
+          提示：未配置 TENCENT_APP_ID，部分语音能力（如录音文件识别）可能受限，一句话识别不受影响。
         </div>
         <div class="hint">前端不展示密钥明文，密钥不会下发到浏览器。</div>
       </el-alert>

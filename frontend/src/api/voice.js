@@ -17,3 +17,6 @@ export const synthesizeSpeech = async (text, voiceType) => {
   const res = await axios.post('/api/voice/tts', { text, voiceType }, { responseType: 'blob' })
   return res.data
 }
+
+// 腾讯云语音密钥配置状态（不暴露密钥本身）
+export const getVoiceStatus = () => request.get('/voice/status')
