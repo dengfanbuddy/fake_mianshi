@@ -171,8 +171,12 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     @Override
     @Transactional(readOnly = true)
     public WrittenTestDetailResponse getDetail(Long sessionId) {
-        sessionRepository.findById(sessionId)
+        InterviewSession session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("笔试会话不存在: id=" + sessionId));
+        // 类型校验：模拟面试会话不应走笔试详情接口（前端以此判定会话类型）
+        if (!"WRITTEN".equals(session.getType())) {
+            throw new ResourceNotFoundException("该会话不是笔试会话");
+        }
 
         List<WrittenTestQuestion> questions = questionRepository.findBySessionIdOrderByOrderNum(sessionId);
         Map<Long, WrittenTestAnswer> answerByQuestion = answerRepository.findBySessionId(sessionId).stream()

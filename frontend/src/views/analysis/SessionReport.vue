@@ -4,10 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   getSessionAnalysis,
-  getWrittenTestDetail,
   getMockMessages,
+  refreshSessionAnalysis,
+  probeWrittenTestDetail,
 } from '../../api/analysis'
-import { WarningFilled, ChatDotRound, ArrowLeft } from '@element-plus/icons-vue'
+import { WarningFilled, ChatDotRound, ArrowLeft, Refresh } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +24,7 @@ const messages = ref([])
 const loading = ref(true)
 const messageLoading = ref(false)
 const dialogVisible = ref(false)
+const refreshing = ref(false)
 
 // 单题折叠面板展开项
 const activeNames = ref([])
@@ -230,28 +232,44 @@ async function fetchAll() {
     // 拦截器已提示
   }
 
-  // 判定会话类型：笔试有记录，模拟面试则 404
-  let isWritten = false
-  try {
-    const wres = await getWrittenTestDetail(sessionId)
-    if (wres.code === 200) {
-      written.value = wres.data
-      isWritten = true
-    }
-  } catch (e) {
-    // 非笔试会话，属于正常分支
+  // 判定会话类型：笔试有记录；模拟面试后端返回 404（静默探测，不弹错误提示）
+  const wdata = await probeWrittenTestDetail(sessionId)
+  if (wdata) {
+    written.value = wdata
+    sessionType.value = 'written'
+  } else {
+    sessionType.value = 'interview'
   }
 
-  if (isWritten) {
-    sessionType.value = 'written'
+  if (sessionType.value === 'written') {
     // 笔试：默认展开全部单题
     activeNames.value = mergedQuestions.value.map((_, i) => i)
   } else {
-    sessionType.value = 'interview'
     activeNames.value = mergedQuestions.value.map((_, i) => i)
     await loadMessages()
   }
   loading.value = false
+}
+
+// 重新生成分析报告
+async function handleRefresh() {
+  refreshing.value = true
+  try {
+    const res = await refreshSessionAnalysis(sessionId)
+    if (res.code === 200 && res.data) {
+      analysis.value = res.data
+      ElMessage.success('分析报告已重新生成')
+      // 类型重新探测（重新生成后类型不变，但数据刷新）
+      const wdata = await probeWrittenTestDetail(sessionId)
+      if (wdata) written.value = wdata
+    } else {
+      ElMessage.error(res.message || '重新生成失败')
+    }
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function goBack() {
@@ -272,6 +290,18 @@ onMounted(fetchAll)
         <el-tag v-if="sessionType === 'written'" type="warning" effect="dark">笔试报告</el-tag>
         <el-tag v-else-if="sessionType === 'interview'" type="primary" effect="dark">模拟面试报告</el-tag>
         <el-tag v-else type="info" effect="plain">加载中</el-tag>
+        <el-button
+          v-if="!loading && analysis"
+          class="refresh-btn"
+          type="primary"
+          plain
+          size="small"
+          :icon="Refresh"
+          :loading="refreshing"
+          @click="handleRefresh"
+        >
+          重新生成分析
+        </el-button>
       </div>
     </header>
 
@@ -638,6 +668,14 @@ onMounted(fetchAll)
 }
 .back-btn {
   min-width: 64px;
+}
+.top-tag {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.refresh-btn {
+  flex-shrink: 0;
 }
 
 /* ---------- 内容 ---------- */
