@@ -465,7 +465,10 @@ onBeforeUnmount(() => {
         <div class="gen-stream raw-text">
           <template v-if="streamText">{{ streamText }}</template>
           <template v-else-if="streamReasoning">
-            🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…
+            <div class="reasoning-box">
+              <div class="reasoning-hint">🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…</div>
+              <div class="reasoning-text">{{ streamReasoning }}</div>
+            </div>
           </template>
           <template v-else>正在连接 AI，开始生成分析报告…</template>
         </div>
@@ -900,6 +903,27 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.8;
   color: #303133;
+}
+.gen-stream.raw-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reasoning-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.reasoning-hint {
+  font-size: 13px;
+  color: #e6a23c;
+  font-weight: 600;
+}
+.reasoning-text {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.7;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 .gen-stream h1,
 .gen-stream h2,

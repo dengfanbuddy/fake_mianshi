@@ -24,9 +24,21 @@ const elapsed = ref(0)
 const idleElapsed = ref(0)
 const streamText = ref('') // 流式 markdown 原文
 const streamReasoning = ref('') // AI 思考过程（思考中提示）
+// 简单 HTML 转义，避免思考内容破坏 v-html 结构
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
 const renderedMarkdown = computed(() => {
   if (streamText.value) return marked.parse(streamText.value)
-  if (streamReasoning.value) return '<span class='thinking-hint'>🤔 AI 正在思考（已思考 ' + streamReasoning.value.length + ' 字）…</span>'
+  if (streamReasoning.value) {
+    return (
+      '<div class="thinking-hint">🤔 AI 正在思考中（已思考 ' +
+      streamReasoning.value.length +
+      ' 字）…</div><pre class="thinking-text">' +
+      escapeHtml(streamReasoning.value) +
+      '</pre>'
+    )
+  }
   return '正在连接 AI，开始生成题目…'
 })
 const failed = ref(false)
@@ -322,6 +334,19 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.8;
   color: #303133;
+}
+.gen-stream .thinking-hint {
+  font-size: 13px;
+  color: #e6a23c;
+  font-weight: 600;
+}
+.gen-stream .thinking-text {
+  font-size: 12px;
+  color: #909399;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  margin-top: 6px;
 }
 .gen-tip {
   font-size: 12px;
