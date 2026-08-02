@@ -469,7 +469,7 @@ onBeforeUnmount(() => {
         <el-tag v-else-if="sessionType === 'interview'" type="primary" effect="dark">模拟面试报告</el-tag>
         <el-tag v-else type="info" effect="plain">加载中</el-tag>
         <el-button
-          v-if="!loading && analysis"
+          v-if="!loading && (analysis || generateTimedOut)"
           class="refresh-btn"
           type="primary"
           plain
@@ -503,11 +503,14 @@ onBeforeUnmount(() => {
         </div>
         <div class="gen-sub">生成完成后自动切换为格式化报告，无需操作。</div>
       </div>
-      <!-- 生成超时：提示稍后刷新 -->
+      <!-- 生成超时/失败：提示 + 重试按钮 -->
       <div v-else-if="generateTimedOut && !analysis" class="generating-panel">
         <el-icon :size="44" color="#e6a23c"><WarningFilled /></el-icon>
-        <div class="gen-title">分析生成较慢</div>
-        <div class="gen-sub">已等待超过 {{ GENERATE_TIMEOUT }} 秒仍未完成，可稍后刷新页面查看，或点击右上角「重新生成分析」。</div>
+        <div class="gen-title">分析生成未完成</div>
+        <div class="gen-sub">{{ failReason || '已等待超过 ' + GENERATE_TIMEOUT + ' 秒仍未完成，可稍后刷新页面查看。' }}</div>
+        <div class="fail-actions">
+          <el-button type="primary" :icon="Refresh" @click="handleRefresh">重新生成分析</el-button>
+        </div>
       </div>
       <template v-else-if="!loading && analysis">
         <!-- 1. 顶部概览卡 -->
@@ -921,6 +924,9 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #909399;
   white-space: nowrap;
+}
+.fail-actions {
+  margin-top: 6px;
 }
 .gen-stream {
   max-height: 52vh;
