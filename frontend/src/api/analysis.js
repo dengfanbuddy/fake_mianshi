@@ -7,6 +7,12 @@ export const getSessionAnalysis = (sessionId) => request.get(`/analysis/session/
 // 历史综合分析报告
 export const getHistoryAnalysis = (projectId) => request.get(`/analysis/history/${projectId}`)
 
+// 历史综合分析状态（未分析会话数 / 是否有新分析可重新综合）
+export const getHistoryStatus = (projectId) => request.get(`/analysis/history/status/${projectId}`)
+
+// 强制重新生成历史综合分析
+export const refreshHistoryAnalysis = (projectId) => request.post(`/analysis/history/refresh/${projectId}`)
+
 // 笔试原始结果（用于报告补充展示）
 export const getWrittenTestDetail = (sessionId) => request.get(`/written-test/${sessionId}`)
 

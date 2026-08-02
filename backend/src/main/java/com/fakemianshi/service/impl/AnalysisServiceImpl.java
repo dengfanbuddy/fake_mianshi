@@ -244,6 +244,54 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public com.fakemianshi.dto.HistoryStatusDTO getHistoryStatus(Long projectId) {
+        List<InterviewSession> sessions = sessionRepository.findByProjectIdOrderByCreatedAtDesc(projectId);
+        List<HistoricalAnalysis> snapshots =
+                historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(projectId);
+        LocalDateTime latestHistoryAt = snapshots.isEmpty() ? null : snapshots.get(0).getGeneratedAt();
+
+        int completed = 0;
+        int unanalyzed = 0;
+        LocalDateTime latestAnalyzedAt = null;
+        for (InterviewSession s : sessions) {
+            if (!"COMPLETED".equals(s.getStatus())) {
+                continue;
+            }
+            completed++;
+            List<SessionAnalysis> analyses = sessionAnalysisRepository.findBySessionId(s.getId());
+            if (analyses.isEmpty()) {
+                unanalyzed++;
+            } else {
+                LocalDateTime at = analyses.get(0).getCreatedAt();
+                if (at != null && (latestAnalyzedAt == null || at.isAfter(latestAnalyzedAt))) {
+                    latestAnalyzedAt = at;
+                }
+            }
+        }
+
+        com.fakemianshi.dto.HistoryStatusDTO dto = new com.fakemianshi.dto.HistoryStatusDTO();
+        dto.setTotalSessions(sessions.size());
+        dto.setCompletedSessions(completed);
+        dto.setUnanalyzedCount(unanalyzed);
+        dto.setLatestHistoryAt(latestHistoryAt);
+        dto.setLatestAnalyzedAt(latestAnalyzedAt);
+        // 有分析结果比快照新，或尚无快照但已有分析结果 → 需要（重新）综合分析
+        boolean hasNew = latestAnalyzedAt != null
+                && (latestHistoryAt == null || latestAnalyzedAt.isAfter(latestHistoryAt));
+        dto.setHasNewAnalysis(hasNew);
+        return dto;
+    }
+
+    @Override
+    @Transactional
+    public HistoricalAnalysis refreshHistory(Long projectId) {
+        historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(projectId)
+                .forEach(h -> historicalAnalysisRepository.deleteById(h.getId()));
+        return analyzeHistory(projectId);
+    }
+
+    @Override
     @Transactional
     public void updateWeaknessTags(Long projectId, Long sessionId) {
         List<SessionAnalysis> analyses = sessionAnalysisRepository.findBySessionId(sessionId);

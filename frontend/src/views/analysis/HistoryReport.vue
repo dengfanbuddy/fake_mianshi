@@ -2,7 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getHistoryAnalysis } from '../../api/analysis'
+import { getHistoryAnalysis, getHistoryStatus, refreshHistoryAnalysis } from '../../api/analysis'
 import { ArrowLeft } from '@element-plus/icons-vue'
 
 const route = useRoute()
@@ -12,6 +12,8 @@ const projectId = route.params.projectId
 const loading = ref(true)
 const history = ref(null) // 原始 { id, projectId, analysisData, generatedAt }
 const report = ref(null) // 解析后的分析数据
+const status = ref(null) // 历史分析状态
+const refreshing = ref(false) // 重新综合分析中
 
 // 项目名：query 优先，无则占位
 const projectName = computed(
@@ -74,17 +76,41 @@ function formatDateTime(s) {
 async function fetchHistory() {
   loading.value = true
   try {
-    const res = await getHistoryAnalysis(projectId)
-    if (res.code === 200) {
-      history.value = res.data
-      report.value = parseAnalysisData(res.data?.analysisData)
+    const [hres, sres] = await Promise.all([
+      getHistoryAnalysis(projectId),
+      getHistoryStatus(projectId),
+    ])
+    if (hres.code === 200) {
+      history.value = hres.data
+      report.value = parseAnalysisData(hres.data?.analysisData)
     } else {
-      ElMessage.error(res.message || '加载历史分析失败')
+      ElMessage.error(hres.message || '加载历史分析失败')
     }
+    if (sres.code === 200) status.value = sres.data
   } catch (e) {
     // 拦截器已提示
   } finally {
     loading.value = false
+  }
+}
+
+// 重新综合分析（删除旧快照重新生成）
+async function handleRegenerate() {
+  refreshing.value = true
+  try {
+    const res = await refreshHistoryAnalysis(projectId)
+    if (res.code === 200) {
+      history.value = res.data
+      report.value = parseAnalysisData(res.data?.analysisData)
+      ElMessage.success('历史综合分析已重新生成')
+      await fetchHistory()
+    } else {
+      ElMessage.error(res.message || '重新综合分析失败')
+    }
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -108,6 +134,36 @@ onMounted(fetchHistory)
     </header>
 
     <main class="history-body" v-loading="loading">
+      <!-- 分析状态提示 -->
+      <div v-if="!loading && status" class="status-alerts">
+        <el-alert
+          v-if="status.unanalyzedCount > 0"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`历史里有 ${status.unanalyzedCount} 个笔试/面试已完成但尚未完成 AI 分析，分析完成后可重新综合分析`"
+        />
+        <el-alert
+          v-if="status.hasNewAnalysis"
+          type="success"
+          :closable="false"
+          show-icon
+          title="检测到新的分析结果，可重新综合分析"
+        >
+          <template #default>
+            <el-button
+              type="primary"
+              size="small"
+              plain
+              :loading="refreshing"
+              @click="handleRegenerate"
+            >
+              重新综合分析
+            </el-button>
+          </template>
+        </el-alert>
+      </div>
+
       <template v-if="!loading && report">
         <!-- 1. 整体评价卡 -->
         <section class="card progress-card">
@@ -220,6 +276,12 @@ onMounted(fetchHistory)
 }
 
 /* ---------- 内容 ---------- */
+.status-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 4px;
+}
 .history-body {
   max-width: 920px;
   margin: 0 auto;

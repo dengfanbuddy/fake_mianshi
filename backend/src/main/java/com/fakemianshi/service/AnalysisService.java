@@ -73,4 +73,15 @@ public interface AnalysisService {
      * 该会话的分析是否正在生成中（用于并发防重：避免重复触发导致 SQLite 写锁冲突）。
      */
     boolean isAnalyzing(Long sessionId);
+
+    /**
+     * 历史综合分析状态：已完成但未分析的会话数、是否存在比最新快照更新的分析结果等，
+     * 用于前端提示"可重新综合分析 / 尚有会话未分析完"。
+     */
+    com.fakemianshi.dto.HistoryStatusDTO getHistoryStatus(Long projectId);
+
+    /**
+     * 强制重新生成历史综合分析：删除旧快照后重新调用 LLM 生成。
+     */
+    HistoricalAnalysis refreshHistory(Long projectId);
 }

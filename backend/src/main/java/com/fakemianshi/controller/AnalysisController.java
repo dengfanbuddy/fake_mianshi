@@ -2,6 +2,7 @@ package com.fakemianshi.controller;
 
 import com.fakemianshi.config.ResourceNotFoundException;
 import com.fakemianshi.dto.AnalysisResultDTO;
+import com.fakemianshi.dto.HistoryStatusDTO;
 import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.entity.HistoricalAnalysis;
 import com.fakemianshi.service.AnalysisService;
@@ -134,6 +135,22 @@ public class AnalysisController {
     @GetMapping("/history/{projectId}")
     public ApiResponse<HistoricalAnalysis> history(@PathVariable Long projectId) {
         return ApiResponse.success(analysisService.getLatestHistory(projectId));
+    }
+
+    /**
+     * 历史综合分析状态：未完成分析的会话数、是否有新分析可重新综合。
+     */
+    @GetMapping("/history/status/{projectId}")
+    public ApiResponse<HistoryStatusDTO> historyStatus(@PathVariable Long projectId) {
+        return ApiResponse.success(analysisService.getHistoryStatus(projectId));
+    }
+
+    /**
+     * 强制重新生成历史综合分析：删除旧快照后重新调用 LLM 生成。
+     */
+    @PostMapping("/history/refresh/{projectId}")
+    public ApiResponse<HistoricalAnalysis> refreshHistory(@PathVariable Long projectId) {
+        return ApiResponse.success(analysisService.refreshHistory(projectId));
     }
 
     /**
