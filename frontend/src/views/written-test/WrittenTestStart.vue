@@ -23,6 +23,11 @@ const elapsed = ref(0)
 const idleElapsed = ref(0)
 const streamText = ref('') // 流式原文（JSON）
 const streamReasoning = ref('') // AI 思考过程（思考中提示）
+const genTitle = computed(() => {
+  if (streamText.value) return 'AI 正在生成题目，边写边展示…'
+  if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
+  return 'AI 正在准备题目…'
+})
 const failed = ref(false)
 const failReason = ref('')
 
@@ -53,6 +58,12 @@ function startTimers() {
       abortByTimeout('AI 出题中断（' + IDLE_TIMEOUT + ' 秒无新内容），请重试')
     }
   }, 1000)
+  // 8 秒无任何事件 → 提示连接异常（等待总超时兜底）
+  setTimeout(() => {
+    if (waiting.value && !finished && !streamText.value && !streamReasoning.value) {
+      streamText.value = '⚠️ AI 连接似乎无响应（已等待 8 秒无内容），仍在尝试，若长时间无反应可点击重新尝试。'
+    }
+  }, 8000)
 }
 
 function fail(message) {
@@ -188,7 +199,7 @@ onBeforeUnmount(() => {
             class="gen-progress"
           />
           <div class="gen-meta">
-            <span class="gen-text">AI 正在生成题目，边写边展示…</span>
+            <span class="gen-text">{{ genTitle }}</span>
             <span class="gen-elapsed">已等待 {{ elapsed }} 秒</span>
           </div>
         </div>
