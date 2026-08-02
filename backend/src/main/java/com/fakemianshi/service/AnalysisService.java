@@ -57,6 +57,11 @@ public interface AnalysisService {
     AnalysisResultDTO refreshAnalysis(Long sessionId);
 
     /**
+     * 删除某会话的分析数据（会话分析 + 单题分析），供重新生成前清理。
+     */
+    void deleteAnalysis(Long sessionId);
+
+    /**
      * 异步触发会话分析：分析不存在且当前未在生成中时，后台线程生成，立即返回。
      * 用于报告页轮询场景，避免同步阻塞 LLM 调用（可达 60s+）。
      */

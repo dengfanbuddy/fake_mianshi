@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -50,18 +51,23 @@ public class AnalysisController {
     /**
      * 流式生成分析报告：SSE 推送 AI 分析过程（event: delta = markdown 增量片段），
      * 完成后推送 event: done = 完整报告 JSON；失败推送 event: error。
-     * 分析已存在时直接推送 done（不重复生成）。
+     * 分析已存在时直接推送 done（不重复生成）；force=true 时先删除旧分析再重新生成。
      */
     @GetMapping(value = "/stream/{sessionId}", produces = "text/event-stream")
-    public SseEmitter streamSession(@PathVariable Long sessionId) {
+    public SseEmitter streamSession(@PathVariable Long sessionId,
+                                    @RequestParam(defaultValue = "false") boolean force) {
         SseEmitter emitter = new SseEmitter(240_000L);
 
-        // 分析已存在：直接返回完整报告
+        // 分析已存在：非强制时直接返回完整报告；强制时删除旧分析重新生成
         try {
-            AnalysisResultDTO dto = analysisService.getSessionAnalysis(sessionId);
-            emitter.send(SseEmitter.event().name("done").data(dto));
-            emitter.complete();
-            return emitter;
+            analysisService.getSessionAnalysis(sessionId);
+            if (!force) {
+                emitter.send(SseEmitter.event().name("done")
+                        .data(analysisService.getSessionAnalysis(sessionId)));
+                emitter.complete();
+                return emitter;
+            }
+            analysisService.deleteAnalysis(sessionId);
         } catch (ResourceNotFoundException ignored) {
             // 未生成，进入流式生成
         } catch (IOException e) {

@@ -6,7 +6,6 @@ import { marked } from 'marked'
 import {
   getSessionAnalysis,
   getMockMessages,
-  refreshSessionAnalysis,
   probeWrittenTestDetail,
 } from '../../api/analysis'
 import { getSessionInfo } from '../../api/session'
@@ -287,13 +286,14 @@ async function fetchAnalysisOnce() {
   }
 }
 
-/** 分析未生成时打开 SSE 流：实时渲染 AI 生成的分析内容，done 后展示完整报告 */
-function startStreamingAnalysis() {
+/** 分析未生成时打开 SSE 流：实时渲染 AI 生成的分析内容，done 后展示完整报告；force=true 时强制重新生成 */
+function startStreamingAnalysis(force = false) {
   generating.value = true
   generateElapsed.value = 0
   generateTimedOut.value = false
   streamDone = false
   streamText.value = ''
+  if (eventSource) eventSource.close()
   // 倒计时（SSE 中断兜底）
   if (generateTimer) clearInterval(generateTimer)
   generateTimer = setInterval(() => {
@@ -305,7 +305,10 @@ function startStreamingAnalysis() {
   }, 1000)
 
   try {
-    eventSource = new EventSource(`/api/analysis/stream/${sessionId}`)
+    const url = force
+      ? `/api/analysis/stream/${sessionId}?force=1`
+      : `/api/analysis/stream/${sessionId}`
+    eventSource = new EventSource(url)
     eventSource.addEventListener('delta', (e) => {
       if (e.data) streamText.value += e.data
     })
@@ -377,25 +380,15 @@ function stopGeneratePolling() {
   generating.value = false
 }
 
-// 重新生成分析报告
-async function handleRefresh() {
+// 重新生成分析报告（流式展示生成过程）
+function handleRefresh() {
   refreshing.value = true
-  try {
-    const res = await refreshSessionAnalysis(sessionId)
-    if (res.code === 200 && res.data) {
-      analysis.value = res.data
-      ElMessage.success('分析报告已重新生成')
-      // 类型重新探测（重新生成后类型不变，但数据刷新）
-      const wdata = await probeWrittenTestDetail(sessionId)
-      if (wdata) written.value = wdata
-    } else {
-      ElMessage.error(res.message || '重新生成失败')
-    }
-  } catch (e) {
-    // 拦截器已提示
-  } finally {
-    refreshing.value = false
-  }
+  // 清空当前展示，进入流式重新生成（force=1）
+  stopGeneratePolling()
+  analysis.value = null
+  streamText.value = ''
+  startStreamingAnalysis(true)
+  refreshing.value = false
 }
 
 function goBack() {

@@ -352,12 +352,18 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Override
     @Transactional
     public AnalysisResultDTO refreshAnalysis(Long sessionId) {
-        // 先删除旧分析（单题分析 + 会话分析），再重新生成
+        deleteAnalysis(sessionId);
+        analyzeSession(sessionId);
+        return getSessionAnalysis(sessionId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteAnalysis(Long sessionId) {
+        // 先删除旧分析（单题分析 + 会话分析）
         questionAnalysisRepository.deleteByIds(questionAnalysisRepository.findBySessionId(sessionId).stream().map(QuestionAnalysis::getId).toList());
         sessionAnalysisRepository.findBySessionId(sessionId)
                 .forEach(a -> sessionAnalysisRepository.deleteById(a.getId()));
-        analyzeSession(sessionId);
-        return getSessionAnalysis(sessionId);
     }
 
     // ---------------- 内部方法 ----------------
