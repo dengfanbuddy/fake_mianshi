@@ -57,9 +57,9 @@ public class ProjectController {
         return ApiResponse.success(saved);
     }
 
-    /** 异步线程池：新职业提示词生成不阻塞项目创建/更新 */
+    /** 异步线程池：新职业提示词生成不阻塞项目创建/更新（单线程串行，避免并发写库锁冲突） */
     private final java.util.concurrent.ExecutorService templateExecutor =
-            java.util.concurrent.Executors.newCachedThreadPool();
+            java.util.concurrent.Executors.newSingleThreadExecutor();
 
     /** 新职业检测：目标岗位没有提示词模板时，后台由 AI 生成全部场景并保存 */
     private void ensureTemplates(InterviewProject project) {

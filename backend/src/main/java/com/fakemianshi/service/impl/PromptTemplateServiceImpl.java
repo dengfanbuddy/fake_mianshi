@@ -174,7 +174,6 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     }
 
     @Override
-    @Transactional
     public List<String> ensureOccupationTemplates(String occupation) {
         List<String> generated = new ArrayList<>();
         if (occupation == null || occupation.isBlank() || DEFAULT_OCCUPATION.equals(occupation.trim())) {
@@ -218,7 +217,6 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     }
 
     @Override
-    @Transactional
     public String regenerateByAI(String occupation, String scene) {
         String occ = (occupation == null || occupation.isBlank()) ? DEFAULT_OCCUPATION : occupation.trim();
         // 参考模板：同场景现有模板（职业版优先，否则 default）
