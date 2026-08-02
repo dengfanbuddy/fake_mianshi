@@ -58,10 +58,10 @@ function startTimers() {
       abortByTimeout('AI 出题中断（' + IDLE_TIMEOUT + ' 秒无新内容），请重试')
     }
   }, 1000)
-  // 8 秒无任何事件 → 提示连接异常（等待总超时兜底）
+  // 8 秒无任何事件 → 明确失败提示 + 重试按钮（避免无限挂起）
   setTimeout(() => {
     if (waiting.value && !finished && !streamText.value && !streamReasoning.value) {
-      streamText.value = '⚠️ AI 连接似乎无响应（已等待 8 秒无内容），仍在尝试，若长时间无反应可点击重新尝试。'
+      abortByTimeout('AI 连接无响应（8 秒无任何内容），请点击重新尝试')
     }
   }, 8000)
 }
