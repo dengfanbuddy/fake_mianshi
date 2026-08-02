@@ -72,9 +72,7 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     }
 
     /**
-     * 构建笔试出题 system prompt：双输出设计——
-     * ① Markdown 展示部分（流式推给前端实时渲染，用户边等边看题）；
-     * ② 以单独一行 ==JSON_START== 为界，输出严格 JSON 数组（自动判分/存库用，前端不展示）。
+     * 构建笔试出题 system prompt：要求严格输出 JSON 数组（流式推送原文供前端实时展示）。
      */
     private String buildWrittenTestPrompt(int questionCount) {
         return """
@@ -86,22 +84,12 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
                 3. 题目难度要适配候选人资历级别；
                 4. 题目要贴近真实面试。
 
-                【输出要求】
-                第一部分（Markdown 展示）：用 Markdown 格式输出全部题目，每道题格式如下：
-                ### 1. [单选题] 题目内容
-                - A. 选项一
-                - B. 选项二
-                - C. 选项三
-                - D. 选项四
-                （注意：展示部分不要写出答案和解析）
-
-                第二部分（结构化数据）：展示部分结束后，单独一行输出 ==JSON_START==，
-                其后输出一个严格 JSON 数组（不要输出任何其他文字、代码块围栏或注释），数组每项格式：
+                请严格返回如下 JSON 数组，不要输出任何额外文字或 Markdown 代码块，数组每项格式：
                 {"type":"SINGLE_CHOICE","content":"...","options":["A","B","C","D"],"answer":"A","explanation":"...","knowledgePoints":["JVM"]}
                 说明：
                 - 填空题/简答题的 options 为 null；
                 - type 枚举：SINGLE_CHOICE / MULTIPLE_CHOICE / FILL_BLANK / SHORT_ANSWER；
-                - JSON 数组项数与 Markdown 展示的题目数必须一致。
+                - JSON 数组项数必须与题目数量一致。
                 """.formatted(questionCount);
     }
 

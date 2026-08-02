@@ -1,9 +1,8 @@
 <script setup>
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { WarningFilled } from '@element-plus/icons-vue'
-import { marked } from 'marked'
 import { useWrittenTestStore } from '../../stores/writtenTest'
 
 const route = useRoute()
@@ -24,23 +23,6 @@ const elapsed = ref(0)
 const idleElapsed = ref(0)
 const streamText = ref('') // 流式 markdown 原文
 const streamReasoning = ref('') // AI 思考过程（思考中提示）
-// 简单 HTML 转义，避免思考内容破坏 v-html 结构
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-const renderedMarkdown = computed(() => {
-  if (streamText.value) return marked.parse(streamText.value)
-  if (streamReasoning.value) {
-    return (
-      '<div class="thinking-hint">🤔 AI 正在思考中（已思考 ' +
-      streamReasoning.value.length +
-      ' 字）…</div><pre class="thinking-text">' +
-      escapeHtml(streamReasoning.value) +
-      '</pre>'
-    )
-  }
-  return '正在连接 AI，开始生成题目…'
-})
 const failed = ref(false)
 const failReason = ref('')
 
@@ -210,7 +192,16 @@ onBeforeUnmount(() => {
             <span class="gen-elapsed">已等待 {{ elapsed }} 秒</span>
           </div>
         </div>
-        <div class="gen-stream markdown-body" v-html="renderedMarkdown"></div>
+        <div class="gen-stream raw-text">
+          <template v-if="streamText">{{ streamText }}</template>
+          <template v-else-if="streamReasoning">
+            <div class="reasoning-box">
+              <div class="thinking-hint">🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…</div>
+              <pre class="thinking-text">{{ streamReasoning }}</pre>
+            </div>
+          </template>
+          <template v-else>正在连接 AI，开始生成题目…</template>
+        </div>
         <div class="gen-tip">正在实时预览 AI 生成的题目，完成后自动进入考试；若中断会提示重试。</div>
       </div>
 
@@ -334,6 +325,15 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.8;
   color: #303133;
+}
+.gen-stream.raw-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reasoning-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 .gen-stream .thinking-hint {
   font-size: 13px;
