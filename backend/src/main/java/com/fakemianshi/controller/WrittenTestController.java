@@ -51,7 +51,7 @@ public class WrittenTestController {
     @PostMapping(value = "/stream-start/{projectId}", produces = "text/event-stream")
     public SseEmitter streamStart(@PathVariable Long projectId,
                                   @RequestBody(required = false) WrittenTestStartRequest req) {
-        SseEmitter emitter = new SseEmitter(180_000L);
+        SseEmitter emitter = new SseEmitter(300_000L);
         sseExecutor.execute(() -> {
             try {
                 WrittenTestStartResponse res = writtenTestService.streamStart(projectId, req,

@@ -162,7 +162,7 @@ public class LlmServiceImpl implements LlmService {
                 .header("Authorization", "Bearer " + config.getApiKey())
                 .header("Content-Type", "application/json")
                 // 流式长任务（出题），超时放宽
-                .timeout(Duration.ofSeconds(180))
+                .timeout(Duration.ofSeconds(300))
                 .POST(HttpRequest.BodyPublishers.ofString(requestJson, StandardCharsets.UTF_8))
                 .build();
 

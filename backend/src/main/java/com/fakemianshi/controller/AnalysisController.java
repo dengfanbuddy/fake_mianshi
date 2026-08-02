@@ -56,7 +56,7 @@ public class AnalysisController {
     @GetMapping(value = "/stream/{sessionId}", produces = "text/event-stream")
     public SseEmitter streamSession(@PathVariable Long sessionId,
                                     @RequestParam(defaultValue = "false") boolean force) {
-        SseEmitter emitter = new SseEmitter(240_000L);
+        SseEmitter emitter = new SseEmitter(420_000L);
 
         // 分析已存在：非强制时直接返回完整报告；强制时删除旧分析重新生成
         try {

@@ -44,8 +44,9 @@ const generatingTitle = computed(() => {
   if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
   return 'AI 正在准备分析报告…'
 })
-const GENERATE_TIMEOUT = 300 // 生成总超时（秒）
+const GENERATE_TIMEOUT = 420 // 生成总超时（秒）
 const IDLE_TIMEOUT = 60 // 空闲超时（秒）：超过该时长无任何输出则判定中断
+const stalled = ref(false) // 输出停滞提示
 let generateTimer = null
 let eventSource = null
 let streamDone = false // SSE 已收到 done（避免 error 事件误触发轮询）
@@ -308,10 +309,22 @@ function startStreamingAnalysis(force = false) {
   if (eventSource) eventSource.close()
   // 超时策略：空闲超时（无任何输出 60 秒）+ 总超时（300 秒），有输出则持续等待
   let lastOutputAt = Date.now()
+  let lastLen = streamText.value.length
+  let stallCheck = 0
+  stalled.value = false
   if (generateTimer) clearInterval(generateTimer)
   generateTimer = setInterval(() => {
     generateElapsed.value += 1
     if (streamDone) return
+    // 30 秒字数无增长 → 提示停滞（不判死，继续等）
+    if (streamText.value.length === lastLen) {
+      stallCheck += 1
+      if (stallCheck >= 30) stalled.value = true
+    } else {
+      lastLen = streamText.value.length
+      stallCheck = 0
+      stalled.value = false
+    }
     if (Date.now() - lastOutputAt > IDLE_TIMEOUT * 1000) {
       stopStreamingAnalysis()
       generateTimedOut.value = true
@@ -489,7 +502,7 @@ onBeforeUnmount(() => {
         <div class="gen-header">
           <el-icon :size="20" class="is-loading" color="#409eff"><Loading /></el-icon>
           <span class="gen-title">{{ generatingTitle }}</span>
-          <span class="gen-elapsed">已等待 {{ generateElapsed }} 秒</span>
+          <span class="gen-elapsed">已等待 {{ generateElapsed }} 秒 · 已接收 {{ streamText.length }} 字</span>
         </div>
         <div class="gen-stream raw-text">
           <template v-if="streamText">{{ displayStream }}</template>
@@ -499,6 +512,7 @@ onBeforeUnmount(() => {
               <div class="reasoning-text">{{ streamReasoning }}</div>
             </div>
           </template>
+          <template v-else-if="stalled">AI 输出似乎停滞（{{ IDLE_TIMEOUT }} 秒无新内容），仍在等待…</template>
           <template v-else>正在连接 AI，开始生成分析报告…</template>
         </div>
         <div class="gen-sub">生成完成后自动切换为格式化报告，无需操作。</div>
