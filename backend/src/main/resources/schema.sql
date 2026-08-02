@@ -11,6 +11,19 @@ CREATE TABLE IF NOT EXISTS ai_model_config (
     created_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS voice_config (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider   VARCHAR(50)  NOT NULL,
+    secret_id  VARCHAR(300),
+    secret_key VARCHAR(500),
+    app_id     VARCHAR(100),
+    region     VARCHAR(50),
+    asr_url    VARCHAR(300),
+    tts_url    VARCHAR(300),
+    is_active  BOOLEAN,
+    updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS historical_analysis (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id    BIGINT NOT NULL,

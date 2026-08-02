@@ -21,6 +21,12 @@ export const synthesizeSpeech = async (text, voiceType) => {
 // 腾讯云语音密钥配置状态（不暴露密钥本身）
 export const getVoiceStatus = () => request.get('/voice/status')
 
+// 获取当前生效的语音配置（脱敏回显）
+export const getVoiceConfig = () => request.get('/voice/config')
+
+// 保存语音配置并激活（密钥留空表示保留原值）
+export const saveVoiceConfig = (data) => request.post('/voice/config', data)
+
 // 保存候选人录音（wav），返回可回放的相对路径（用于消息 audioPath）
 export const uploadAudio = (sessionId, audioBlob) => {
   const formData = new FormData()

@@ -8,11 +8,13 @@ import {
   updatePersona,
   deletePersona,
 } from '../api/persona'
-import { getVoiceStatus } from '../api/voice'
+import { getVoiceStatus, getVoiceConfig, saveVoiceConfig } from '../api/voice'
 
 /* ---------------- 腾讯云语音配置状态 ---------------- */
 const voiceConfigured = ref(null) // null=加载中, true/false
 const appIdConfigured = ref(false)
+const voiceForm = ref({ secretId: '', secretKey: '', appId: '' })
+const voiceSaving = ref(false)
 
 async function fetchVoiceStatus() {
   try {
@@ -23,6 +25,46 @@ async function fetchVoiceStatus() {
     }
   } catch (e) {
     // 拦截器已提示；加载失败保持 null
+  }
+}
+
+// 回显当前生效的语音配置（密钥脱敏）
+async function fetchVoiceConfig() {
+  try {
+    const res = await getVoiceConfig()
+    if (res.code === 200 && res.data) {
+      voiceForm.value.secretId = res.data.secretId || ''
+      voiceForm.value.secretKey = ''
+      voiceForm.value.appId = res.data.appId || ''
+    }
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
+// 保存语音配置并激活（密钥留空保留原值）
+async function saveVoiceConfigAction() {
+  if (voiceSaving.value) return
+  voiceSaving.value = true
+  try {
+    const res = await saveVoiceConfig({
+      secretId: voiceForm.value.secretId.trim(),
+      secretKey: voiceForm.value.secretKey.trim(),
+      appId: voiceForm.value.appId.trim(),
+    })
+    if (res.code === 200) {
+      ElMessage.success('语音配置已保存并激活，立即生效')
+      voiceForm.value.secretId = res.data?.secretId || ''
+      voiceForm.value.secretKey = ''
+      voiceForm.value.appId = res.data?.appId || ''
+      await fetchVoiceStatus()
+    } else {
+      ElMessage.error(res.message || '保存失败')
+    }
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    voiceSaving.value = false
   }
 }
 
@@ -209,6 +251,7 @@ async function handleDeletePersona(row) {
 onMounted(() => {
   fetchConfigs()
   fetchPersonas()
+  fetchVoiceConfig()
   fetchVoiceStatus()
 })
 </script>
@@ -255,30 +298,55 @@ onMounted(() => {
       </el-table>
     </el-card>
 
-    <!-- 腾讯云语音配置说明 -->
+    <!-- 腾讯云语音配置（页面可配置、存库激活） -->
     <el-card class="section" shadow="never">
       <template #header>
-        <span>腾讯云语音配置</span>
+        <span>腾讯云语音配置（TTS/ASR）</span>
       </template>
-      <el-alert type="info" :closable="false" class="voice-alert">
-        <div>语音识别（STT）与语音合成（TTS）依赖腾讯云密钥，密钥通过后端环境变量配置：</div>
-        <div class="code-line">TENCENT_SECRET_ID / TENCENT_SECRET_KEY / TENCENT_APP_ID</div>
+
+      <el-form label-width="110px" class="voice-form">
+        <el-form-item label="SecretId">
+          <el-input
+            v-model="voiceForm.secretId"
+            placeholder="腾讯云 SecretId（留空表示保留原值）"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="SecretKey">
+          <el-input
+            v-model="voiceForm.secretKey"
+            placeholder="腾讯云 SecretKey（留空表示保留原值）"
+            show-password
+          />
+        </el-form-item>
+        <el-form-item label="AppId">
+          <el-input v-model="voiceForm.appId" placeholder="腾讯云 AppId（可选，录音文件识别用）" />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="voiceSaving" @click="saveVoiceConfigAction">
+            保存并激活
+          </el-button>
+          <span class="hint" style="margin-left: 12px">保存后立即生效，无需重启服务</span>
+        </el-form-item>
+      </el-form>
+
+      <el-alert type="info" :closable="false">
         <div>
           状态：
           <el-tag v-if="voiceConfigured === null" type="info" size="small" effect="plain">检测中…</el-tag>
           <el-tag v-else-if="voiceConfigured" type="success" size="small" effect="dark">已配置</el-tag>
           <el-tag v-else type="warning" size="small" effect="plain">未配置</el-tag>
           <span class="hint" v-if="voiceConfigured === false">
-            请在后端环境变量中配置 TENCENT_SECRET_ID / TENCENT_SECRET_KEY 后重启后端服务。
+            请在下方填写腾讯云密钥并保存，或通过后端环境变量 TENCENT_SECRET_ID / TENCENT_SECRET_KEY 配置。
           </span>
-          <span class="hint" v-else-if="voiceConfigured">
-            STT / TTS 已可用。
-          </span>
+          <span class="hint" v-else-if="voiceConfigured">STT / TTS 已可用。</span>
         </div>
         <div class="hint" v-if="voiceConfigured && !appIdConfigured">
-          提示：未配置 TENCENT_APP_ID，部分语音能力（如录音文件识别）可能受限，一句话识别不受影响。
+          提示：未配置 AppId，部分语音能力（如录音文件识别）可能受限，一句话识别不受影响。
         </div>
-        <div class="hint">前端不展示密钥明文，密钥不会下发到浏览器。</div>
+        <div class="hint">
+          配置保存在本地数据库中（密钥仅脱敏回显，不会明文下发到浏览器），打包分发后直接在页面填写即可，无需修改环境变量。
+        </div>
       </el-alert>
     </el-card>
 

@@ -38,14 +38,31 @@ public class VoiceController {
     private final VoiceService voiceService;
     private final AudioStorageUtil audioStorageUtil;
     private final TencentCloudProperties tencentCloudProperties;
+    private final com.fakemianshi.service.VoiceConfigService voiceConfigService;
 
-    /** 腾讯云语音密钥配置状态（供前端展示，不暴露密钥本身） */
+    /** 腾讯云语音密钥配置状态（数据库配置或环境变量，供前端展示，不暴露密钥本身） */
     @GetMapping("/status")
     public ApiResponse<Map<String, Object>> status() {
+        com.fakemianshi.dto.VoiceConfigDTO cfg = voiceConfigService.getActiveConfig();
+        boolean configured = cfg != null && Boolean.TRUE.equals(cfg.getConfigured());
+        boolean appIdConfigured = cfg != null && cfg.getAppId() != null && !cfg.getAppId().isBlank();
         return ApiResponse.success(Map.of(
-                "configured", tencentCloudProperties.isConfigured(),
-                "appIdConfigured", tencentCloudProperties.getAppId() != null
-                        && !tencentCloudProperties.getAppId().isBlank()));
+                "configured", configured,
+                "appIdConfigured", appIdConfigured));
+    }
+
+    /** 获取当前生效的语音配置（脱敏，页面回显用） */
+    @GetMapping("/config")
+    public ApiResponse<com.fakemianshi.dto.VoiceConfigDTO> getConfig() {
+        return ApiResponse.success(voiceConfigService.getActiveConfig());
+    }
+
+    /** 保存语音配置并激活（页面配置，打包分发后无需改环境变量） */
+    @PostMapping("/config")
+    public ApiResponse<com.fakemianshi.dto.VoiceConfigDTO> saveConfig(
+            @RequestBody com.fakemianshi.dto.VoiceConfigDTO dto) {
+        voiceConfigService.saveConfig(dto);
+        return ApiResponse.success(voiceConfigService.getActiveConfig());
     }
 
     /** 语音识别（STT）：上传音频，返回识别文本 */

@@ -52,6 +52,10 @@ public class VoiceServiceImpl implements VoiceService {
     private final TencentCloudProperties properties;
     private final HttpClient httpClient;
 
+    /** 数据库语音配置（页面可配）；测试构造器不注入时回退环境变量 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.fakemianshi.service.VoiceConfigService voiceConfigService;
+
     /**
      * 生产环境构造器：创建带超时配置的默认 HttpClient。
      */
@@ -70,6 +74,17 @@ public class VoiceServiceImpl implements VoiceService {
         this.httpClient = httpClient;
     }
 
+    /** 解析当前生效的语音配置：数据库配置优先，回退环境变量 */
+    private com.fakemianshi.entity.VoiceConfig resolveVoiceConfig() {
+        if (voiceConfigService != null) {
+            com.fakemianshi.entity.VoiceConfig cfg = voiceConfigService.resolveActive();
+            if (cfg != null && cfg.isConfigured()) {
+                return cfg;
+            }
+        }
+        return null;
+    }
+
     @Override
     public String recognizeSpeech(byte[] audioData) {
         validateConfigured();
@@ -86,7 +101,9 @@ public class VoiceServiceImpl implements VoiceService {
             root.put("DataLen", audioData.length);
             String payload = OBJECT_MAPPER.writeValueAsString(root);
 
-            String responseBody = doPost(properties.getAsrUrl(), ASR_SERVICE, "SentenceRecognition", ASR_VERSION, payload);
+            com.fakemianshi.entity.VoiceConfig cfg = resolveVoiceConfig();
+            String asrUrl = cfg != null ? cfg.getAsrUrl() : properties.getAsrUrl();
+            String responseBody = doPost(asrUrl, ASR_SERVICE, "SentenceRecognition", ASR_VERSION, payload);
 
             JsonNode responseNode = OBJECT_MAPPER.readTree(responseBody).path("Response");
             JsonNode error = responseNode.path("Error");
@@ -114,7 +131,9 @@ public class VoiceServiceImpl implements VoiceService {
             root.put("Volume", 0);
             String payload = OBJECT_MAPPER.writeValueAsString(root);
 
-            String responseBody = doPost(properties.getTtsUrl(), TTS_SERVICE, "TextToVoice", TTS_VERSION, payload);
+            com.fakemianshi.entity.VoiceConfig cfg = resolveVoiceConfig();
+            String ttsUrl = cfg != null ? cfg.getTtsUrl() : properties.getTtsUrl();
+            String responseBody = doPost(ttsUrl, TTS_SERVICE, "TextToVoice", TTS_VERSION, payload);
 
             JsonNode responseNode = OBJECT_MAPPER.readTree(responseBody).path("Response");
             JsonNode error = responseNode.path("Error");
@@ -166,7 +185,7 @@ public class VoiceServiceImpl implements VoiceService {
      * 校验腾讯云密钥已配置，未配置时抛出业务异常。
      */
     private void validateConfigured() {
-        if (!properties.isConfigured()) {
+        if (resolveVoiceConfig() == null && !properties.isConfigured()) {
             throw new BusinessException("未配置腾讯云语音密钥，请在设置中配置");
         }
     }
@@ -225,8 +244,12 @@ public class VoiceServiceImpl implements VoiceService {
     private String doPost(String url, String service, String action, String version, String payload) {
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
         String host = URI.create(url).getHost();
-        String authorization = tc3Sign(properties.getSecretId(), properties.getSecretKey(),
-                service, host, action, version, timestamp, payload, properties.getRegion());
+        com.fakemianshi.entity.VoiceConfig cfg = resolveVoiceConfig();
+        String secretId = cfg != null ? cfg.getSecretId() : properties.getSecretId();
+        String secretKey = cfg != null ? cfg.getSecretKey() : properties.getSecretKey();
+        String region = cfg != null ? cfg.getRegion() : properties.getRegion();
+        String authorization = tc3Sign(secretId, secretKey,
+                service, host, action, version, timestamp, payload, region);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -234,7 +257,7 @@ public class VoiceServiceImpl implements VoiceService {
                 .header("X-TC-Action", action)
                 .header("X-TC-Version", version)
                 .header("X-TC-Timestamp", timestamp)
-                .header("X-TC-Region", properties.getRegion())
+                .header("X-TC-Region", cfg != null ? cfg.getRegion() : properties.getRegion())
                 .header("Authorization", authorization)
                 .timeout(Duration.ofSeconds(60))
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
