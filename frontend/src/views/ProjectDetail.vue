@@ -291,6 +291,25 @@ async function handleGenerateFromResume() {
 const sessions = ref([])
 const sessionsLoading = ref(false)
 
+// 进行中的考试（可继续）
+const inProgressSessions = computed(() =>
+  (sessions.value || []).filter((s) => s.status === 'IN_PROGRESS')
+)
+
+function formatTime(t) {
+  if (!t) return ''
+  return String(t).replace('T', ' ').slice(0, 16)
+}
+
+// 继续进行中的笔试/面试
+function continueSession(s) {
+  if (s.type === 'WRITTEN') {
+    router.push(`/written-test/exam/${s.id}`)
+  } else {
+    router.push(`/mock-interview/${projectId}?sessionId=${s.id}`)
+  }
+}
+
 function typeText(type) {
   return { WRITTEN: '笔试', MOCK: '模拟面试', BOTH: '笔试+面试' }[type] || type || '—'
 }
@@ -637,6 +656,20 @@ onMounted(() => {
           <el-button type="warning" @click="startFullFlow">🚀 完整流程</el-button>
         </div>
 
+        <!-- 进行中的考试：可继续 -->
+        <div v-if="inProgressSessions.length" class="resume-bar">
+          <div class="resume-title">⏳ 进行中的考试</div>
+          <div v-for="s in inProgressSessions" :key="s.id" class="resume-item">
+            <el-tag :type="typeTagType(s.type)" size="small" effect="dark">
+              {{ s.type === 'WRITTEN' ? '笔试' : '模拟面试' }}
+            </el-tag>
+            <span class="resume-info">已开始于 {{ formatTime(s.startedAt) }}</span>
+            <el-button type="primary" size="small" plain @click="continueSession(s)">
+              {{ s.type === 'WRITTEN' ? '继续笔试' : '继续面试' }}
+            </el-button>
+          </div>
+        </div>
+
         <el-table
           v-if="sessions.length"
           v-loading="sessionsLoading"
@@ -769,7 +802,34 @@ onMounted(() => {
 .section {
   margin-bottom: 20px;
 }
-.section-body {
+.resume-bar {
+  background: #fdf6ec;
+  border: 1px solid #f3d19e;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+.resume-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b88230;
+  margin-bottom: 8px;
+}
+.resume-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.resume-item:last-child {
+  margin-bottom: 0;
+}
+.resume-info {
+  font-size: 13px;
+  color: #606266;
+  flex: 1;
+}
+
   min-height: 60px;
 }
 

@@ -117,6 +117,18 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     }
 
     @Override
+    public WrittenTestStartResponse getExamInProgress(Long sessionId) {
+        InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
+                .orElseThrow(() -> new BusinessException("笔试会话不存在"));
+        if (!"IN_PROGRESS".equals(session.getStatus())) {
+            throw new BusinessException("该笔试已结束或状态异常，无法继续");
+        }
+        List<WrittenTestQuestion> questions =
+                questionRepository.findBySessionIdOrderByOrderNum(sessionId);
+        return buildStartResponse(session, questions);
+    }
+
+    @Override
     @Transactional
     public WrittenTestSubmitResponse submit(Long sessionId, WrittenTestSubmitRequest req) {
         InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))

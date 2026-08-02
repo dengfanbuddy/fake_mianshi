@@ -33,4 +33,9 @@ public interface WrittenTestService {
      * 笔试详情：题目 + 用户答案 + 对错（考试已结束，可返回答案与解析）。
      */
     WrittenTestDetailResponse getDetail(Long sessionId);
+
+    /**
+     * 获取进行中笔试的考试内容（题目脱敏），用于"继续笔试"：会话必须为 IN_PROGRESS。
+     */
+    WrittenTestStartResponse getExamInProgress(Long sessionId);
 }

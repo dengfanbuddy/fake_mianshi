@@ -3,7 +3,7 @@ import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
-import { submitTest } from '../../api/written-test'
+import { submitTest, getExamInProgress } from '../../api/written-test'
 import { useWrittenTestStore } from '../../stores/writtenTest'
 
 // 题目内容支持 markdown 渲染（代码块、列表等）
@@ -148,20 +148,43 @@ async function handleSubmit() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 优先从本地缓存恢复（刚出完题的场景）
   const session = store.load()
-  if (!session || session.sessionId !== sessionId || !Array.isArray(session.questions)) {
-    ElMessage.warning('未找到有效的考试信息，请重新开始考试')
-    router.replace('/')
+  if (session && session.sessionId === sessionId && Array.isArray(session.questions)) {
+    initExam(session.questions, session.deadline || Date.now() + session.timeLimit * 60000)
     return
   }
-  questions.value = session.questions
+  // 缓存丢失（刷新/离开后继续）：从后端拉取进行中的笔试
+  try {
+    const res = await getExamInProgress(sessionId)
+    if (res.code === 200 && res.data?.questions?.length) {
+      const dto = res.data
+      store.save({
+        sessionId,
+        projectId: dto.projectId || route.query.projectId || session?.projectId || null,
+        timeLimit: dto.timeLimit,
+        deadline: Date.now() + dto.timeLimit * 60000,
+        questions: dto.questions,
+      })
+      initExam(dto.questions, Date.now() + dto.timeLimit * 60000)
+      return
+    }
+  } catch (e) {
+    // 拦截器已提示
+  }
+  ElMessage.warning('未找到有效的考试信息，请重新开始考试')
+  router.replace('/')
+})
+
+function initExam(list, deadline) {
+  questions.value = list
   // 初始化答案容器（多选为数组）
   for (const q of questions.value) {
     answers[q.id] = q.type === 'MULTIPLE_CHOICE' ? [] : ''
   }
   loaded.value = true
-  startCountdown(session.deadline || Date.now() + session.timeLimit * 60000)
+  startCountdown(deadline)
 })
 
 onBeforeUnmount(() => {

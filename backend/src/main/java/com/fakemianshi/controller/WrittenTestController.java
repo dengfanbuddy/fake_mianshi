@@ -92,6 +92,12 @@ public class WrittenTestController {
         return ApiResponse.success(writtenTestService.submit(sessionId, req));
     }
 
+    /** 继续进行中的笔试：返回考试内容（题目脱敏），供刷新/离开后恢复考试 */
+    @GetMapping("/exam/{sessionId}")
+    public ApiResponse<WrittenTestStartResponse> examInProgress(@PathVariable Long sessionId) {
+        return ApiResponse.success(writtenTestService.getExamInProgress(sessionId));
+    }
+
     /** 笔试详情（考试结束后查看结果/分析报告） */
     @GetMapping("/{sessionId}")
     public ApiResponse<WrittenTestDetailResponse> detail(@PathVariable Long sessionId) {
