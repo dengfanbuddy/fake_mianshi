@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, computed, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { WarningFilled } from '@element-plus/icons-vue'
@@ -21,7 +21,13 @@ const IDLE_TIMEOUT = 60 // 流式空闲超时（秒，无新内容则判定中�
 const waiting = ref(false)
 const elapsed = ref(0)
 const idleElapsed = ref(0)
-const streamText = ref('') // 流式 markdown 原文
+const streamText = ref('') // 流式原文（JSON）
+// 显示时去掉模型可能输出的 ```json 代码块围栏
+const displayStream = computed(() => {
+  let t = streamText.value
+  t = t.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
+  return t
+})
 const streamReasoning = ref('') // AI 思考过程（思考中提示）
 const failed = ref(false)
 const failReason = ref('')
@@ -193,7 +199,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="gen-stream raw-text">
-          <template v-if="streamText">{{ streamText }}</template>
+          <template v-if="streamText">{{ displayStream }}</template>
           <template v-else-if="streamReasoning">
             <div class="reasoning-box">
               <div class="thinking-hint">🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…</div>
