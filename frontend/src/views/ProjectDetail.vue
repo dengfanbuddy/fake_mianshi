@@ -588,7 +588,7 @@ onMounted(() => {
         <template v-else>
           <el-form label-width="90px" class="position-form">
             <el-form-item label="岗位名称" required>
-              <el-input v-model="positionForm.jobTitle" placeholder="例如：Java 后端工程师" />
+              <el-input v-model="positionForm.jobTitle" placeholder="例如：后端开发工程师 / 产品经理" />
             </el-form-item>
             <el-form-item label="职级">
               <el-select v-model="positionForm.seniority" placeholder="选择职级" clearable class="form-select">
@@ -601,7 +601,7 @@ onMounted(() => {
               </el-select>
             </el-form-item>
             <el-form-item label="经验要求">
-              <el-input v-model="positionForm.experience" placeholder="例如：3-5 年 Java 开发经验" />
+              <el-input v-model="positionForm.experience" placeholder="例如：3-5 年相关经验" />
             </el-form-item>
             <el-form-item label="技术栈">
               <el-select
@@ -611,7 +611,7 @@ onMounted(() => {
                 allow-create
                 default-first-option
                 :reserve-keyword="false"
-                placeholder="输入后回车添加，例如 Java、Spring"
+                placeholder="输入后回车添加，例如：数据库、项目架构"
                 class="form-select"
               >
                 <el-option v-for="t in positionForm.techStack" :key="t" :label="t" :value="t" />

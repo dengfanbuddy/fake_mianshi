@@ -27,6 +27,11 @@ const routes = [
         component: () => import('../views/Settings.vue'),
       },
       {
+        path: 'prompt-templates',
+        name: 'PromptTemplates',
+        component: () => import('../views/PromptTemplates.vue'),
+      },
+      {
         path: 'project/:id',
         name: 'ProjectDetail',
         component: () => import('../views/ProjectDetail.vue'),

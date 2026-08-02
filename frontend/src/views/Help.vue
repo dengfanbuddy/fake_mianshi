@@ -6,7 +6,7 @@ const router = useRouter()
 const activeTab = ref('guide')
 
 const guideSteps = [
-  { title: '1. 新建项目', desc: '在「项目管理」页新建面试项目，描述你的目标岗位（如 Java 后端高级岗）。', action: '去项目管理 →', path: '/projects' },
+  { title: '1. 新建项目', desc: '在「项目管理」页新建面试项目，填写目标岗位（如后端开发 / 产品经理），系统按职业匹配提示词。', action: '去项目管理 →', path: '/projects' },
   { title: '2. 上传简历', desc: '在项目详情页上传 PDF 简历，AI 自动解析并分析技术栈、经验年限、建议岗位。', action: null, path: '' },
   { title: '3. 确认职位需求', desc: '从简历生成或手动填写职位需求（岗位、资历、技术栈、JD），用于精准出题。', action: null, path: '' },
   { title: '4. 笔试', desc: '单选/多选/填空/简答，限时 60 分钟，自动判分，简答由 AI 评分。', action: null, path: '' },

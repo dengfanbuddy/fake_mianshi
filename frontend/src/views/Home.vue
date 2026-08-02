@@ -50,7 +50,7 @@ onMounted(fetchAll)
     <section class="hero">
       <div class="hero-left">
         <h1 class="hero-title">AI 面试模拟系统</h1>
-        <p class="hero-sub">面向 Java 开发者的求职面试训练：上传简历 → AI 出题 → 笔试 + 语音模拟面试 → 多维分析 → 自适应查漏补缺</p>
+        <p class="hero-sub">面向任何职业的求职面试训练：上传简历 → AI 出题 → 笔试 + 语音模拟面试 → 多维分析 → 自适应查漏补缺</p>
         <div class="hero-actions">
           <el-button type="primary" @click="router.push('/projects')">管理项目</el-button>
           <el-button @click="router.push('/help')">查看使用说明</el-button>
@@ -132,7 +132,7 @@ onMounted(fetchAll)
       <h3 class="section-title">关于</h3>
       <div class="about-card">
         <div class="about-row"><span class="about-label">版本</span><span>v1.0.0</span></div>
-        <div class="about-row"><span class="about-label">定位</span><span>个人求职面试训练工具，Java 后端方向</span></div>
+        <div class="about-row"><span class="about-label">定位</span><span>个人求职面试训练工具，支持任意职业（按职业定制提示词）</span></div>
         <div class="about-row"><span class="about-label">隐私</span><span>数据全部存储在本地 SQLite，AI 调用仅发送任务所需上下文</span></div>
       </div>
     </section>

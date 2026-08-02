@@ -27,7 +27,7 @@ const activeMenu = computed(() => {
     <el-aside width="240px" class="aside">
       <div class="brand">
         <div class="brand-name">AI面试模拟</div>
-        <div class="brand-sub">Java 面试训练</div>
+        <div class="brand-sub">AI 面试训练</div>
       </div>
       <el-menu
         :default-active="activeMenu"
@@ -48,6 +48,10 @@ const activeMenu = computed(() => {
         <el-menu-item index="/settings">
           <span class="menu-icon">⚙️</span>
           <span>设置</span>
+        </el-menu-item>
+        <el-menu-item index="/prompt-templates">
+          <span class="menu-icon">📝</span>
+          <span>提示词管理</span>
         </el-menu-item>
         <el-menu-item index="/help">
           <span class="menu-icon">❓</span>

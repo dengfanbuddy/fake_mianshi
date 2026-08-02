@@ -49,6 +49,9 @@ async function handleCreate() {
     })
     if (res.code === 200) {
       ElMessage.success('项目创建成功')
+      if (form.value.targetPosition?.trim()) {
+        ElMessage.info('已按目标岗位匹配提示词；若为新职业，AI 正在后台生成专属提示词，可到「提示词管理」查看与编辑')
+      }
       dialogVisible.value = false
       await fetchProjects()
     } else {

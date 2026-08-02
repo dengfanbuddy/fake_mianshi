@@ -26,6 +26,7 @@ import java.util.List;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
 
     /** 项目列表（按创建时间倒序） */
     @GetMapping
@@ -42,14 +43,42 @@ public class ProjectController {
     /** 新建项目 */
     @PostMapping
     public ApiResponse<InterviewProject> create(@RequestBody InterviewProject project) {
-        return ApiResponse.success(projectService.create(project));
+        InterviewProject saved = projectService.create(project);
+        ensureTemplates(saved);
+        return ApiResponse.success(saved);
     }
 
     /** 更新项目 */
     @PutMapping("/{id}")
     public ApiResponse<InterviewProject> update(@PathVariable Long id,
                                                 @RequestBody InterviewProject project) {
-        return ApiResponse.success(projectService.update(id, project));
+        InterviewProject saved = projectService.update(id, project);
+        ensureTemplates(saved);
+        return ApiResponse.success(saved);
+    }
+
+    /** 异步线程池：新职业提示词生成不阻塞项目创建/更新 */
+    private final java.util.concurrent.ExecutorService templateExecutor =
+            java.util.concurrent.Executors.newCachedThreadPool();
+
+    /** 新职业检测：目标岗位没有提示词模板时，后台由 AI 生成全部场景并保存 */
+    private void ensureTemplates(InterviewProject project) {
+        String position = project.getTargetPosition();
+        if (position == null || position.isBlank()) {
+            return;
+        }
+        templateExecutor.execute(() -> {
+            try {
+                List<String> generated = promptTemplateService.ensureOccupationTemplates(position);
+                if (!generated.isEmpty()) {
+                    org.slf4j.LoggerFactory.getLogger(ProjectController.class)
+                            .info("已为新职业生成提示词模板: position={}, scenes={}", position, generated);
+                }
+            } catch (Exception e) {
+                org.slf4j.LoggerFactory.getLogger(ProjectController.class)
+                        .warn("新职业提示词生成失败: position={}, cause={}", position, e.getMessage());
+            }
+        });
     }
 
     /** 删除项目（级联删除关联数据） */
