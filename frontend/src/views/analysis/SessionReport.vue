@@ -31,12 +31,6 @@ const generating = ref(false)
 const generateElapsed = ref(0)
 const generateTimedOut = ref(false)
 const streamText = ref('') // AI 正式输出内容（原文实时显示）
-// 显示时去掉模型可能输出的 ```json 代码块围栏
-const displayStream = computed(() => {
-  let t = streamText.value
-  t = t.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
-  return t
-})
 const streamReasoning = ref('') // 思考型模型的思考过程（展示"思考中"状态）
 const failReason = ref('') // 生成失败/中断原因（SSE error 或超时）
 const generatingTitle = computed(() => {
@@ -511,7 +505,7 @@ onBeforeUnmount(() => {
           <span class="gen-elapsed">已等待 {{ generateElapsed }} 秒 · 已接收 {{ streamText.length }} 字</span>
         </div>
         <div class="gen-stream raw-text">
-          <template v-if="streamText">{{ displayStream }}</template>
+          <template v-if="streamText">{{ streamText }}</template>
           <template v-else-if="streamReasoning">
             <div class="reasoning-box">
               <div class="reasoning-hint">🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…</div>
@@ -961,7 +955,8 @@ onBeforeUnmount(() => {
 }
 .gen-stream.raw-text {
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .reasoning-box {
   display: flex;
