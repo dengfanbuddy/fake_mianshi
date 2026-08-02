@@ -296,11 +296,6 @@ const inProgressSessions = computed(() =>
   (sessions.value || []).filter((s) => s.status === 'IN_PROGRESS')
 )
 
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 16)
-}
-
 // 继续进行中的笔试/面试
 function continueSession(s) {
   if (s.type === 'WRITTEN') {
