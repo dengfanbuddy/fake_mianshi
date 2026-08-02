@@ -45,11 +45,13 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     private final WeaknessTagRepository weaknessTagRepository;
     private final WrittenTestQuestionRepository writtenTestQuestionRepository;
     private final InterviewerPersonaRepository interviewerPersonaRepository;
+    private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
+    private final com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
 
     @Override
     @Transactional
     public List<WrittenTestQuestion> generateWrittenTestQuestions(Long sessionId, Long projectId, int questionCount) {
-        String systemPrompt = buildWrittenTestPrompt(questionCount);
+        String systemPrompt = buildWrittenTestPrompt(projectId, questionCount);
         String userPrompt = buildContext(projectId);
         LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
         List<JsonNode> items = parseQuestionArray(extractJsonSection(response.getContent()));
@@ -63,7 +65,7 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
             Long sessionId, Long projectId, int questionCount,
             java.util.function.Consumer<String> onDelta,
             java.util.function.Consumer<String> onReasoning) {
-        String systemPrompt = buildWrittenTestPrompt(questionCount);
+        String systemPrompt = buildWrittenTestPrompt(projectId, questionCount);
         String userPrompt = buildContext(projectId);
         String fullOutput = llmService.chatStream(systemPrompt, userPrompt,
                 LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta, onReasoning);
@@ -74,7 +76,30 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     /**
      * 构建笔试出题 system prompt：要求严格输出 JSON 数组（流式推送原文供前端实时展示）。
      */
-    private String buildWrittenTestPrompt(int questionCount) {
+    private String buildWrittenTestPrompt(Long projectId, int questionCount) {
+        return promptTemplateService.getTemplate(
+                resolveOccupation(projectId),
+                com.fakemianshi.service.PromptTemplateService.Scene.WRITTEN_QUESTION.name(),
+                resolvePosition(projectId));
+    }
+
+    /** 项目目标岗位（职业）；无则 null（走 default 模板） */
+    private String resolveOccupation(Long projectId) {
+        if (projectId == null) {
+            return null;
+        }
+        com.fakemianshi.entity.InterviewProject project = interviewProjectRepository.selectById(projectId);
+        return project == null ? null : project.getTargetPosition();
+    }
+
+    /** 项目目标岗位文本（用于 {position} 占位替换） */
+    private String resolvePosition(Long projectId) {
+        String occupation = resolveOccupation(projectId);
+        return occupation == null ? "" : occupation;
+    }
+
+    /* 预留：原静态出题提示词已迁移至 prompt_template 默认模板 */
+    private String buildWrittenTestPromptLegacy(int questionCount) {
         return """
                 你是资深 Java 面试出题官。请根据职位需求、简历、弱点标签生成 %d 道笔试题。
                 题型分配：单选30%%，多选20%%，填空20%%，简答30%%。
@@ -119,16 +144,15 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     @Override
     @Transactional(readOnly = true)
     public String generateMockInterviewOutline(Long projectId) {
-        String systemPrompt = """
-                你是资深 Java 技术面试官。请根据职位需求、简历、弱点标签，为候选人生成一份模拟面试大纲。
-                要求：
-                1. 技术问题为主（约 70%%），简历项目深挖占 15-20%%，行为面试题少量（约 10-15%%）；
-                2. 弱点标签中列出的知识点优先覆盖；
-                3. 题目数量建议结合候选人资历级别。
-                请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
-                {"sections":[{"type":"TECHNICAL","topics":["并发编程","JVM"]},{"type":"PROJECT","topics":["简历项目深挖"]},{"type":"BEHAVIORAL","topics":["离职原因","职业规划"]}],"estimatedQuestions":15,"focusPoints":["..."]}
-                """;
+        String systemPrompt = promptTemplateService.getTemplate(
+                resolveOccupation(projectId),
+                com.fakemianshi.service.PromptTemplateService.Scene.MOCK_OUTLINE.name(),
+                resolvePosition(projectId));
+        return generateMockInterviewOutline(projectId, systemPrompt);
+    }
 
+    /** 带外部系统提示的面试大纲生成（保留旧实现逻辑） */
+    public String generateMockInterviewOutline(Long projectId, String systemPrompt) {
         String userPrompt = buildContext(projectId);
         return llmService.chat(systemPrompt, userPrompt).getContent();
     }

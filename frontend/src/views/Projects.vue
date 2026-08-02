@@ -12,7 +12,7 @@ const loading = ref(false)
 // 新建项目弹窗
 const dialogVisible = ref(false)
 const creating = ref(false)
-const form = ref({ name: '', description: '' })
+const form = ref({ name: '', targetPosition: '', description: '' })
 
 async function fetchProjects() {
   loading.value = true
@@ -44,6 +44,7 @@ async function handleCreate() {
   try {
     const res = await createProject({
       name: form.value.name.trim(),
+      targetPosition: form.value.targetPosition.trim(),
       description: form.value.description.trim(),
     })
     if (res.code === 200) {
@@ -95,7 +96,12 @@ onMounted(fetchProjects)
           class="card-col"
         >
           <el-card shadow="hover" class="project-card">
-            <div class="card-name">{{ p.name }}</div>
+            <div class="card-name">
+              {{ p.name }}
+              <el-tag v-if="p.targetPosition" size="small" type="primary" effect="plain" class="card-position">
+                {{ p.targetPosition }}
+              </el-tag>
+            </div>
             <div class="card-desc">{{ p.description || '暂无描述' }}</div>
             <div class="card-meta">创建于 {{ formatDate(p.createdAt) }}</div>
             <div class="card-actions">
@@ -109,7 +115,10 @@ onMounted(fetchProjects)
     <el-dialog v-model="dialogVisible" title="新建项目" width="480px">
       <el-form label-width="80px">
         <el-form-item label="项目名称" required>
-          <el-input v-model="form.name" placeholder="例如：Java 后端岗求职训练" maxlength="100" />
+          <el-input v-model="form.name" placeholder="例如：后端开发求职训练" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="目标岗位">
+          <el-input v-model="form.targetPosition" placeholder="例如：Java后端开发 / 产品经理 / 前端工程师（用于匹配面试提示词）" maxlength="100" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input
@@ -150,6 +159,17 @@ onMounted(fetchProjects)
   height: 100%;
 }
 .card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.card-position {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
   font-size: 16px;
   font-weight: 600;
   color: #303133;

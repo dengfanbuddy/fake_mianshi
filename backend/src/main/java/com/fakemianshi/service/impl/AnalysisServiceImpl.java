@@ -124,6 +124,8 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final WeaknessTagRepository weaknessTagRepository;
     private final HistoricalAnalysisRepository historicalAnalysisRepository;
     private final LlmService llmService;
+    private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
+    private final com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
 
     /** 分析生成中标记（防重复触发） */
     private final java.util.Set<Long> analyzingSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -194,13 +196,21 @@ public class AnalysisServiceImpl implements AnalysisService {
         String type = session.getType();
         JsonNode analysisNode;
         if (TYPE_WRITTEN.equals(type)) {
+            String systemPrompt = promptTemplateService.getTemplate(
+                    resolveOccupation(session.getProjectId()),
+                    com.fakemianshi.service.PromptTemplateService.Scene.WRITTEN_ANALYSIS.name(),
+                    resolvePosition(session.getProjectId()));
             analysisNode = onDelta == null
-                    ? callLlm(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId))
-                    : callLlmStream(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId), onDelta, onReasoning);
+                    ? callLlm(systemPrompt, buildWrittenUserPrompt(sessionId))
+                    : callLlmStream(systemPrompt, buildWrittenUserPrompt(sessionId), onDelta, onReasoning);
         } else if (TYPE_MOCK.equals(type)) {
+            String systemPrompt = promptTemplateService.getTemplate(
+                    resolveOccupation(session.getProjectId()),
+                    com.fakemianshi.service.PromptTemplateService.Scene.MOCK_ANALYSIS.name(),
+                    resolvePosition(session.getProjectId()));
             analysisNode = onDelta == null
-                    ? callLlm(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId))
-                    : callLlmStream(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId), onDelta, onReasoning);
+                    ? callLlm(systemPrompt, buildMockUserPrompt(sessionId))
+                    : callLlmStream(systemPrompt, buildMockUserPrompt(sessionId), onDelta, onReasoning);
         } else {
             throw new BusinessException("不支持的会话类型: " + type);
         }
@@ -219,6 +229,21 @@ public class AnalysisServiceImpl implements AnalysisService {
         return analysis;
     }
 
+    /** 项目目标岗位（职业）；无则 null（走 default 模板） */
+    private String resolveOccupation(Long projectId) {
+        if (projectId == null) {
+            return null;
+        }
+        com.fakemianshi.entity.InterviewProject project = interviewProjectRepository.selectById(projectId);
+        return project == null ? null : project.getTargetPosition();
+    }
+
+    /** 项目目标岗位文本（用于 {position} 占位替换） */
+    private String resolvePosition(Long projectId) {
+        String occupation = resolveOccupation(projectId);
+        return occupation == null ? "" : occupation;
+    }
+
     @Override
     @Transactional(readOnly = true)
     public List<QuestionAnalysis> analyzeQuestions(Long sessionId) {
@@ -234,7 +259,11 @@ public class AnalysisServiceImpl implements AnalysisService {
             throw new BusinessException("该项目暂无面试记录");
         }
 
-        JsonNode node = callLlm(HISTORY_SYSTEM_PROMPT, buildHistoryUserPrompt(projectId, analyses));
+        String systemPrompt = promptTemplateService.getTemplate(
+                resolveOccupation(projectId),
+                com.fakemianshi.service.PromptTemplateService.Scene.HISTORY_ANALYSIS.name(),
+                resolvePosition(projectId));
+        JsonNode node = callLlm(systemPrompt, buildHistoryUserPrompt(projectId, analyses));
 
         HistoricalAnalysis historical = new HistoricalAnalysis();
         historical.setProjectId(projectId);

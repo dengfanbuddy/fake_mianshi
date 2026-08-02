@@ -79,11 +79,17 @@ class AnalysisServiceTest {
         weaknessTagRepository = mock(WeaknessTagRepository.class);
         historicalAnalysisRepository = mock(HistoricalAnalysisRepository.class);
         llmService = mock(LlmService.class);
+        com.fakemianshi.service.PromptTemplateService promptTemplateService =
+                mock(com.fakemianshi.service.PromptTemplateService.class);
+        com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository =
+                mock(com.fakemianshi.repository.InterviewProjectRepository.class);
+        when(promptTemplateService.getTemplate(any(), any(), any())).thenReturn("你是面试官。请严格输出 JSON。");
 
         service = new AnalysisServiceImpl(
                 sessionRepository, writtenTestQuestionRepository, writtenTestAnswerRepository,
                 mockInterviewMessageRepository, sessionAnalysisRepository, questionAnalysisRepository,
-                weaknessTagRepository, historicalAnalysisRepository, llmService);
+                weaknessTagRepository, historicalAnalysisRepository, llmService,
+                promptTemplateService, interviewProjectRepository);
 
         // 会话分析内存库
         when(sessionAnalysisRepository.insert(any(SessionAnalysis.class))).thenAnswer(inv -> {

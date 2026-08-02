@@ -40,6 +40,8 @@ class QuestionGenerationServiceTest {
     private WeaknessTagRepository weaknessTagRepository;
     private WrittenTestQuestionRepository writtenTestQuestionRepository;
     private InterviewerPersonaRepository interviewerPersonaRepository;
+    private com.fakemianshi.service.PromptTemplateService promptTemplateService;
+    private com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
     private QuestionGenerationService service;
 
     @BeforeEach
@@ -50,11 +52,16 @@ class QuestionGenerationServiceTest {
         weaknessTagRepository = mock(WeaknessTagRepository.class);
         writtenTestQuestionRepository = mock(WrittenTestQuestionRepository.class);
         interviewerPersonaRepository = mock(InterviewerPersonaRepository.class);
+        promptTemplateService = mock(com.fakemianshi.service.PromptTemplateService.class);
+        interviewProjectRepository = mock(com.fakemianshi.repository.InterviewProjectRepository.class);
+        when(promptTemplateService.getTemplate(any(), any(), any()))
+                .thenReturn("你是面试官。请严格输出 JSON。");
 
         service = new QuestionGenerationServiceImpl(
                 llmService, resumeService, positionRequirementService,
                 weaknessTagRepository, writtenTestQuestionRepository,
-                interviewerPersonaRepository);
+                interviewerPersonaRepository,
+                promptTemplateService, interviewProjectRepository);
 
         // save 直接返回传入对象，模拟 JPA 行为
         when(writtenTestQuestionRepository.insert(any(WrittenTestQuestion.class)))

@@ -18,6 +18,10 @@ public class InterviewProject {
     /** 项目名称 */
     private String name;
 
+    /** 目标岗位/职业（如 Java后端开发、产品经理），用于按职业匹配面试提示词 */
+    @TableField("target_position")
+    private String targetPosition;
+
     /** 项目描述 */
     private String description;
 

@@ -32,11 +32,12 @@ CREATE TABLE IF NOT EXISTS historical_analysis (
 );
 
 CREATE TABLE IF NOT EXISTS interview_project (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        VARCHAR(200) NOT NULL,
-    description VARCHAR(2000),
-    created_at  TIMESTAMP NOT NULL,
-    updated_at  TIMESTAMP NOT NULL
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           VARCHAR(200) NOT NULL,
+    target_position VARCHAR(200),
+    description    VARCHAR(2000),
+    created_at     TIMESTAMP NOT NULL,
+    updated_at     TIMESTAMP NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS interview_session (
@@ -162,4 +163,14 @@ CREATE TABLE IF NOT EXISTS written_test_question (
     explanation      VARCHAR(5000),
     knowledge_points VARCHAR(2000),
     order_num        INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS prompt_template (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    occupation VARCHAR(100) NOT NULL,
+    scene      VARCHAR(50)  NOT NULL,
+    content    TEXT NOT NULL,
+    is_active  BOOLEAN,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(occupation, scene)
 );

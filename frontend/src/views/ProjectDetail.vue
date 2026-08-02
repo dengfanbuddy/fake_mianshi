@@ -17,7 +17,7 @@ const project = ref(null)
 const projectLoading = ref(false)
 const editDialogVisible = ref(false)
 const savingProject = ref(false)
-const editForm = ref({ name: '', description: '' })
+const editForm = ref({ name: '', targetPosition: '', description: '' })
 
 async function fetchProject() {
   projectLoading.value = true
@@ -56,6 +56,7 @@ async function handleSaveProject() {
   try {
     const res = await updateProject(projectId, {
       name: editForm.value.name.trim(),
+      targetPosition: editForm.value.targetPosition.trim(),
       description: editForm.value.description.trim(),
     })
     if (res.code === 200) {
