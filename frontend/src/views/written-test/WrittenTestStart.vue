@@ -34,7 +34,7 @@ const failReason = ref('')
 let timer = null
 let idleTimer = null
 let controller = null
-let finished = false // 已成功完成（避免超时计时器误触发失败）
+const finished = ref(false) // 已成功完成（避免超时计时器误触发失败）
 
 function resetTimers() {
   if (timer) clearInterval(timer)
@@ -48,19 +48,19 @@ function startTimers() {
   idleElapsed.value = 0
   timer = setInterval(() => {
     elapsed.value += 1
-    if (elapsed.value >= WAIT_TIMEOUT && waiting.value && !finished) {
+    if (elapsed.value >= WAIT_TIMEOUT && waiting.value && !finished.value) {
       abortByTimeout('AI 出题超过 ' + WAIT_TIMEOUT + ' 秒无响应，请重试')
     }
   }, 1000)
   idleTimer = setInterval(() => {
     idleElapsed.value += 1
-    if (idleElapsed.value >= IDLE_TIMEOUT && waiting.value && !finished && (streamText.value || streamReasoning.value)) {
+    if (idleElapsed.value >= IDLE_TIMEOUT && waiting.value && !finished.value && (streamText.value || streamReasoning.value)) {
       abortByTimeout('AI 出题中断（' + IDLE_TIMEOUT + ' 秒无新内容），请重试')
     }
   }, 1000)
   // 8 秒无任何事件 → 明确失败提示 + 重试按钮（避免无限挂起）
   setTimeout(() => {
-    if (waiting.value && !finished && !streamText.value && !streamReasoning.value) {
+    if (waiting.value && !finished.value && !streamText.value && !streamReasoning.value) {
       abortByTimeout('AI 连接无响应（8 秒无任何内容），请点击重新尝试')
     }
   }, 8000)
