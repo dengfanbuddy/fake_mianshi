@@ -23,7 +23,12 @@ const waiting = ref(false)
 const elapsed = ref(0)
 const idleElapsed = ref(0)
 const streamText = ref('') // 流式 markdown 原文
-const renderedMarkdown = computed(() => marked.parse(streamText.value || '暂无内容，AI 正在生成…'))
+const streamReasoning = ref('') // AI 思考过程（思考中提示）
+const renderedMarkdown = computed(() => {
+  if (streamText.value) return marked.parse(streamText.value)
+  if (streamReasoning.value) return '<span class='thinking-hint'>🤔 AI 正在思考（已思考 ' + streamReasoning.value.length + ' 字）…</span>'
+  return '正在连接 AI，开始生成题目…'
+})
 const failed = ref(false)
 const failReason = ref('')
 
@@ -85,6 +90,7 @@ async function handleStart() {
   failReason.value = ''
   finished.value = false
   streamText.value = ''
+  streamReasoning.value = ''
   controller = new AbortController()
   startTimers()
   try {
@@ -112,6 +118,9 @@ async function handleStart() {
         if (event === 'delta' && data) {
           streamText.value += data
           idleElapsed.value = 0 // 有内容则重置空闲计时
+        } else if (event === 'reasoning' && data) {
+          streamReasoning.value += data
+          idleElapsed.value = 0 // 思考过程也算活跃，避免误判中断
         } else if (event === 'done' && data) {
           finished.value = true
           handleDone(data)

@@ -177,17 +177,19 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Override
     @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {
-        return analyzeSessionInternal(sessionId, null);
+        return analyzeSessionInternal(sessionId, null, null);
     }
 
     @Override
     @Transactional
-    public SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta) {
-        return analyzeSessionInternal(sessionId, onDelta);
+    public SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta,
+                                                java.util.function.Consumer<String> onReasoning) {
+        return analyzeSessionInternal(sessionId, onDelta, onReasoning);
     }
 
     /** 分析主流程：LLM 生成（可选流式）→ 解析 JSON 存库 → 更新弱点标签 */
-    private SessionAnalysis analyzeSessionInternal(Long sessionId, java.util.function.Consumer<String> onDelta) {
+    private SessionAnalysis analyzeSessionInternal(Long sessionId, java.util.function.Consumer<String> onDelta,
+                                                   java.util.function.Consumer<String> onReasoning) {
         InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("面试会话不存在: id=" + sessionId));
 
@@ -202,11 +204,11 @@ public class AnalysisServiceImpl implements AnalysisService {
         if (TYPE_WRITTEN.equals(type)) {
             analysisNode = onDelta == null
                     ? callLlm(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId))
-                    : callLlmStream(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId), onDelta);
+                    : callLlmStream(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId), onDelta, onReasoning);
         } else if (TYPE_MOCK.equals(type)) {
             analysisNode = onDelta == null
                     ? callLlm(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId))
-                    : callLlmStream(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId), onDelta);
+                    : callLlmStream(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId), onDelta, onReasoning);
         } else {
             throw new BusinessException("不支持的会话类型: " + type);
         }
@@ -374,10 +376,12 @@ public class AnalysisServiceImpl implements AnalysisService {
         return parseAnalysisJson(response.getContent());
     }
 
-    /** 流式调用 LLM：增量文本经 onDelta 推送（供 SSE 实时展示），返回解析后的 JSON 节点 */
+    /** 流式调用 LLM：内容增量经 onDelta、思考过程经 onReasoning 推送，返回解析后的 JSON 节点 */
     private JsonNode callLlmStream(String systemPrompt, String userPrompt,
-                                   java.util.function.Consumer<String> onDelta) {
-        String raw = llmService.chatStream(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta);
+                                   java.util.function.Consumer<String> onDelta,
+                                   java.util.function.Consumer<String> onReasoning) {
+        String raw = llmService.chatStream(systemPrompt, userPrompt,
+                LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta, onReasoning);
         return parseAnalysisJson(raw);
     }
 

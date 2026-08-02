@@ -107,7 +107,8 @@ public class LlmServiceImpl implements LlmService {
 
     @Override
     public String chatStream(String systemPrompt, String userPrompt, int maxTokens,
-                             java.util.function.Consumer<String> onDelta) {
+                             java.util.function.Consumer<String> onDelta,
+                             java.util.function.Consumer<String> onReasoning) {
         AIModelConfig config = configRepository.findByIsActiveTrue()
                 .orElseThrow(() -> new BusinessException("未配置可用的AI模型，请在设置中配置"));
 
@@ -123,7 +124,7 @@ public class LlmServiceImpl implements LlmService {
         } catch (JacksonException e) {
             throw new BusinessException("AI模型请求体构建失败: " + e.getMessage(), e);
         }
-        return doPostStream(config, requestJson, onDelta);
+        return doPostStream(config, requestJson, onDelta, onReasoning);
     }
 
     /**
@@ -146,9 +147,12 @@ public class LlmServiceImpl implements LlmService {
     }
 
     /**
-     * 流式 POST：逐行解析 SSE（data: {...}），提取 choices[0].delta.content 增量回调，返回完整拼接内容。
+     * 流式 POST：逐行解析 SSE（data: {...}），提取 choices[0].delta.content 增量回调；
+     * 思考型模型输出 reasoning_content 时经 onReasoning 回调（保证前端有实时反馈）。返回完整拼接内容。
      */
-    private String doPostStream(AIModelConfig config, String requestJson, java.util.function.Consumer<String> onDelta) {
+    private String doPostStream(AIModelConfig config, String requestJson,
+                                java.util.function.Consumer<String> onDelta,
+                                java.util.function.Consumer<String> onReasoning) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(config.getApiUrl()))
                 .header("Authorization", "Bearer " + config.getApiKey())
@@ -186,12 +190,19 @@ public class LlmServiceImpl implements LlmService {
                 }
                 try {
                     JsonNode node = OBJECT_MAPPER.readTree(data);
-                    JsonNode content = node.path("choices").path(0).path("delta").path("content");
-                    if (!content.isMissingNode() && content.isTextual() && !content.asText().isEmpty()) {
-                        String delta = content.asText();
-                        full.append(delta);
+                    JsonNode delta = node.path("choices").path(0).path("delta");
+                    JsonNode content = delta.path("content");
+                    if (content.isTextual() && !content.asText().isEmpty()) {
+                        String deltaText = content.asText();
+                        full.append(deltaText);
                         if (onDelta != null) {
-                            onDelta.accept(delta);
+                            onDelta.accept(deltaText);
+                        }
+                    } else {
+                        // 思考型模型：content 为空时推送 reasoning_content，保证前端有实时反馈
+                        JsonNode reasoning = delta.path("reasoning_content");
+                        if (onReasoning != null && reasoning.isTextual() && !reasoning.asText().isEmpty()) {
+                            onReasoning.accept(reasoning.asText());
                         }
                     }
                 } catch (JacksonException ignored) {

@@ -54,13 +54,9 @@ public class WrittenTestController {
         SseEmitter emitter = new SseEmitter(180_000L);
         sseExecutor.execute(() -> {
             try {
-                WrittenTestStartResponse res = writtenTestService.streamStart(projectId, req, delta -> {
-                    try {
-                        emitter.send(SseEmitter.event().name("delta").data(delta));
-                    } catch (IOException e) {
-                        throw new RuntimeException("SSE 推送中断", e);
-                    }
-                });
+                WrittenTestStartResponse res = writtenTestService.streamStart(projectId, req,
+                        delta -> sendOrThrow(emitter, "delta", delta),
+                        reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
                 emitter.send(SseEmitter.event().name("done").data(res));
                 emitter.complete();
             } catch (Exception e) {
@@ -75,6 +71,15 @@ public class WrittenTestController {
             }
         });
         return emitter;
+    }
+
+    /** SSE 推送工具：客户端断开时以 RuntimeException 中断生成任务 */
+    private void sendOrThrow(SseEmitter emitter, String name, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data));
+        } catch (IOException e) {
+            throw new RuntimeException("SSE 推送中断", e);
+        }
     }
 
     /** 提交笔试：判分并结束会话 */

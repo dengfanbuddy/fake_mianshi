@@ -80,12 +80,13 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     @Override
     @Transactional
     public WrittenTestStartResponse streamStart(Long projectId, WrittenTestStartRequest req,
-                                                java.util.function.Consumer<String> onDelta) {
+                                                java.util.function.Consumer<String> onDelta,
+                                                java.util.function.Consumer<String> onReasoning) {
         InterviewSession session = createSession(projectId, req);
 
         int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
         List<WrittenTestQuestion> questions = questionGenerationService
-                .generateWrittenTestQuestionsStream(session.getId(), projectId, questionCount, onDelta);
+                .generateWrittenTestQuestionsStream(session.getId(), projectId, questionCount, onDelta, onReasoning);
         return buildStartResponse(session, questions);
     }
 

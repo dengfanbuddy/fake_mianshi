@@ -2,7 +2,6 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { marked } from 'marked'
 import {
   getSessionAnalysis,
   getMockMessages,
@@ -27,14 +26,17 @@ const messageLoading = ref(false)
 const dialogVisible = ref(false)
 const refreshing = ref(false)
 
-// 分析生成中：SSE 流式展示（markdown 实时渲染），失败回落轮询
+// 分析生成中：SSE 流式展示（生成中直接显示原文，完成后格式化），失败回落轮询
 const generating = ref(false)
 const generateElapsed = ref(0)
 const generateTimedOut = ref(false)
-const streamText = ref('')
-const streamRendered = computed(() =>
-  marked.parse(streamText.value || '正在连接 AI，开始生成分析报告…')
-)
+const streamText = ref('') // AI 正式输出内容（原文实时显示）
+const streamReasoning = ref('') // 思考型模型的思考过程（展示"思考中"状态）
+const generatingTitle = computed(() => {
+  if (streamText.value) return 'AI 正在生成分析报告，边写边展示…'
+  if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
+  return 'AI 正在准备分析报告…'
+})
 const GENERATE_TIMEOUT = 180 // 生成超时（秒）
 let generateTimer = null
 let eventSource = null
@@ -293,6 +295,7 @@ function startStreamingAnalysis(force = false) {
   generateTimedOut.value = false
   streamDone = false
   streamText.value = ''
+  streamReasoning.value = ''
   if (eventSource) eventSource.close()
   // 倒计时（SSE 中断兜底）
   if (generateTimer) clearInterval(generateTimer)
@@ -309,6 +312,9 @@ function startStreamingAnalysis(force = false) {
       ? `/api/analysis/stream/${sessionId}?force=1`
       : `/api/analysis/stream/${sessionId}`
     eventSource = new EventSource(url)
+    eventSource.addEventListener('reasoning', (e) => {
+      if (e.data) streamReasoning.value += e.data
+    })
     eventSource.addEventListener('delta', (e) => {
       if (e.data) streamText.value += e.data
     })
@@ -387,6 +393,7 @@ function handleRefresh() {
   stopGeneratePolling()
   analysis.value = null
   streamText.value = ''
+  streamReasoning.value = ''
   startStreamingAnalysis(true)
   refreshing.value = false
 }
@@ -448,15 +455,21 @@ onBeforeUnmount(() => {
     </header>
 
     <main class="report-body" v-loading="loading">
-      <!-- 分析生成中：SSE 流式实时展示 -->
+      <!-- 分析生成中：SSE 流式实时展示（直接显示原文） -->
       <div v-if="generating" class="generating-panel">
         <div class="gen-header">
           <el-icon :size="20" class="is-loading" color="#409eff"><Loading /></el-icon>
-          <span class="gen-title">AI 正在生成分析报告，边写边展示…</span>
+          <span class="gen-title">{{ generatingTitle }}</span>
           <span class="gen-elapsed">已等待 {{ generateElapsed }} 秒</span>
         </div>
-        <div class="gen-stream markdown-body" v-html="streamRendered"></div>
-        <div class="gen-sub">生成完成后自动切换为完整报告，无需操作。</div>
+        <div class="gen-stream raw-text">
+          <template v-if="streamText">{{ streamText }}</template>
+          <template v-else-if="streamReasoning">
+            🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…
+          </template>
+          <template v-else>正在连接 AI，开始生成分析报告…</template>
+        </div>
+        <div class="gen-sub">生成完成后自动切换为格式化报告，无需操作。</div>
       </div>
       <!-- 生成超时：提示稍后刷新 -->
       <div v-else-if="generateTimedOut && !analysis" class="generating-panel">

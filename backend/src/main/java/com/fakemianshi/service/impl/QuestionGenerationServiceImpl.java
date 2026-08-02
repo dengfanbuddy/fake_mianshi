@@ -61,11 +61,12 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     @Transactional
     public List<WrittenTestQuestion> generateWrittenTestQuestionsStream(
             Long sessionId, Long projectId, int questionCount,
-            java.util.function.Consumer<String> onDelta) {
+            java.util.function.Consumer<String> onDelta,
+            java.util.function.Consumer<String> onReasoning) {
         String systemPrompt = buildWrittenTestPrompt(questionCount);
         String userPrompt = buildContext(projectId);
         String fullOutput = llmService.chatStream(systemPrompt, userPrompt,
-                LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta);
+                LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta, onReasoning);
         List<JsonNode> items = parseQuestionArray(extractJsonSection(fullOutput));
         return saveQuestions(items, sessionId);
     }

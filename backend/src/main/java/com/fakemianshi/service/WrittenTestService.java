@@ -21,7 +21,8 @@ public interface WrittenTestService {
      * 完成后返回与 {@link #start} 相同的响应。
      */
     WrittenTestStartResponse streamStart(Long projectId, WrittenTestStartRequest req,
-                                         java.util.function.Consumer<String> onDelta);
+                                         java.util.function.Consumer<String> onDelta,
+                                         java.util.function.Consumer<String> onReasoning);
 
     /**
      * 提交笔试：逐题判分，汇总总分，将会话标记为已完成。

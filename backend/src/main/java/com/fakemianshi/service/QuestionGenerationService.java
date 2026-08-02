@@ -20,7 +20,8 @@ public interface QuestionGenerationService {
      */
     List<WrittenTestQuestion> generateWrittenTestQuestionsStream(
             Long sessionId, Long projectId, int questionCount,
-            java.util.function.Consumer<String> onDelta);
+            java.util.function.Consumer<String> onDelta,
+            java.util.function.Consumer<String> onReasoning);
 
     /**
      * 生成模拟面试大纲（JSON 文本），返回给前端展示。

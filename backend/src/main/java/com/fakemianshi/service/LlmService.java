@@ -31,12 +31,15 @@ public interface LlmService {
 
     /**
      * 流式对话：启用 stream 模式，输出内容通过 onDelta 逐段回调（用于 SSE 推送），
+     * 思考型模型的思考过程经 onReasoning 回调（可为 null，不关心则忽略），
      * 返回完整拼接后的内容文本。
      *
-     * @param onDelta 输出增量回调（可为 null）
+     * @param onDelta     输出内容增量回调（可为 null）
+     * @param onReasoning 思考过程增量回调（可为 null）
      */
     String chatStream(String systemPrompt, String userPrompt, int maxTokens,
-                      java.util.function.Consumer<String> onDelta);
+                      java.util.function.Consumer<String> onDelta,
+                      java.util.function.Consumer<String> onReasoning);
 
     /**
      * 对话消息。

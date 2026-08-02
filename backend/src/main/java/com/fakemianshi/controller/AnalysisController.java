@@ -77,13 +77,10 @@ public class AnalysisController {
 
         sseExecutor.execute(() -> {
             try {
-                analysisService.analyzeSessionStream(sessionId, delta -> {
-                    try {
-                        emitter.send(SseEmitter.event().name("delta").data(delta));
-                    } catch (IOException e) {
-                        throw new RuntimeException("SSE 推送中断", e);
-                    }
-                });
+                // 内容增量推送 delta；思考型模型的思考过程推送 reasoning（前端展示"思考中"）
+                analysisService.analyzeSessionStream(sessionId,
+                        delta -> sendOrThrow(emitter, "delta", delta),
+                        reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
                 // 生成完成后推送完整报告
                 AnalysisResultDTO dto = analysisService.getSessionAnalysis(sessionId);
                 emitter.send(SseEmitter.event().name("done").data(dto));
@@ -100,6 +97,15 @@ public class AnalysisController {
             }
         });
         return emitter;
+    }
+
+    /** SSE 推送工具：客户端断开时以 RuntimeException 中断生成任务 */
+    private void sendOrThrow(SseEmitter emitter, String name, String data) {
+        try {
+            emitter.send(SseEmitter.event().name(name).data(data));
+        } catch (IOException e) {
+            throw new RuntimeException("SSE 推送中断", e);
+        }
     }
 
     /**
