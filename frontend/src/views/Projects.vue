@@ -31,7 +31,7 @@ async function fetchProjects() {
 }
 
 function openCreate() {
-  form.value = { name: '', description: '' }
+  form.value = { name: '', targetPosition: '', description: '' }
   dialogVisible.value = true
 }
 
@@ -166,17 +166,16 @@ onMounted(fetchProjects)
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 8px;
 }
 .card-position {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 8px;
 }
 .card-desc {
   font-size: 13px;
