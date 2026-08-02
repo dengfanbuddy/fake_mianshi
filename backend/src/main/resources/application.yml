@@ -5,7 +5,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:sqlite:./data/fake_mianshi.db
+    url: jdbc:sqlite:./data/fake_mianshi.db?busy_timeout=30000&journal_mode=WAL
     driver-class-name: org.sqlite.JDBC
   # 启动时执行 schema.sql（幂等建表，兼容克隆后的空库与已有库）
   sql:

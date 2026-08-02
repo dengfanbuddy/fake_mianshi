@@ -3,7 +3,7 @@ server:
 
 spring:
   datasource:
-    url: jdbc:sqlite:${java.io.tmpdir}/fm_test_mianshi.db
+    url: jdbc:sqlite:${java.io.tmpdir}/fm_test_mianshi.db?busy_timeout=30000&journal_mode=WAL
     driver-class-name: org.sqlite.JDBC
   sql:
     init:

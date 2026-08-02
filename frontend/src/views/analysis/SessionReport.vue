@@ -32,6 +32,7 @@ const generateElapsed = ref(0)
 const generateTimedOut = ref(false)
 const streamText = ref('') // AI 正式输出内容（原文实时显示）
 const streamReasoning = ref('') // 思考型模型的思考过程（展示"思考中"状态）
+const failReason = ref('') // 生成失败/中断原因（SSE error 或超时）
 const generatingTitle = computed(() => {
   if (streamText.value) return 'AI 正在生成分析报告，边写边展示…'
   if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
@@ -297,6 +298,7 @@ function startStreamingAnalysis(force = false) {
   streamDone = false
   streamText.value = ''
   streamReasoning.value = ''
+  failReason.value = ''
   if (eventSource) eventSource.close()
   // 超时策略：空闲超时（无任何输出 60 秒）+ 总超时（300 秒），有输出则持续等待
   let lastOutputAt = Date.now()
@@ -347,7 +349,14 @@ function startStreamingAnalysis(force = false) {
       stopStreamingAnalysis()
       startGeneratePolling()
     })
-    eventSource.addEventListener('error', () => {
+    eventSource.addEventListener('error', (e) => {
+      // 服务器推送的错误（带 data）：显示具体原因
+      if (e.data) {
+        failReason.value = e.data
+        stopStreamingAnalysis()
+        generateTimedOut.value = true
+        return
+      }
       // done 已收到时连接关闭是正常现象；否则（连接失败/中断）回落轮询
       if (!streamDone && !analysis.value) {
         stopStreamingAnalysis()

@@ -67,9 +67,26 @@ public class AnalysisController {
                 emitter.complete();
                 return emitter;
             }
+            // 强制重新生成：若另一任务正在生成（含上一个未结束的），避免并发写库冲突
+            if (analysisService.isAnalyzing(sessionId)) {
+                emitter.send(SseEmitter.event().name("error")
+                        .data("分析正在生成中，请稍候刷新查看"));
+                emitter.complete();
+                return emitter;
+            }
             analysisService.deleteAnalysis(sessionId);
         } catch (ResourceNotFoundException ignored) {
-            // 未生成，进入流式生成
+            // 未生成，进入流式生成（同样先检查是否已有生成任务在跑）
+            if (analysisService.isAnalyzing(sessionId)) {
+                try {
+                    emitter.send(SseEmitter.event().name("error")
+                            .data("分析正在生成中，请稍候刷新查看"));
+                } catch (IOException ignored2) {
+                    // 客户端已断开
+                }
+                emitter.complete();
+                return emitter;
+            }
         } catch (IOException e) {
             emitter.complete();
             return emitter;

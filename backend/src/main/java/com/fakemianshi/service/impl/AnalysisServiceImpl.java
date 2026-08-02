@@ -162,7 +162,21 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Transactional
     public SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta,
                                                 java.util.function.Consumer<String> onReasoning) {
-        return analyzeSessionInternal(sessionId, onDelta, onReasoning);
+        // 防重：已有任务在生成时不再重复调用 LLM（调用方应先检查 isAnalyzing）
+        if (!analyzingSessions.add(sessionId)) {
+            List<SessionAnalysis> existing = sessionAnalysisRepository.findBySessionId(sessionId);
+            return existing.isEmpty() ? null : existing.get(0);
+        }
+        try {
+            return analyzeSessionInternal(sessionId, onDelta, onReasoning);
+        } finally {
+            analyzingSessions.remove(sessionId);
+        }
+    }
+
+    @Override
+    public boolean isAnalyzing(Long sessionId) {
+        return analyzingSessions.contains(sessionId);
     }
 
     /** 分析主流程：LLM 生成（可选流式）→ 解析 JSON 存库 → 更新弱点标签 */

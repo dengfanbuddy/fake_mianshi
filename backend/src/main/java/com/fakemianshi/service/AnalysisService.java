@@ -68,4 +68,9 @@ public interface AnalysisService {
      * 用于报告页轮询场景，避免同步阻塞 LLM 调用（可达 60s+）。
      */
     void triggerAnalyze(Long sessionId);
+
+    /**
+     * 该会话的分析是否正在生成中（用于并发防重：避免重复触发导致 SQLite 写锁冲突）。
+     */
+    boolean isAnalyzing(Long sessionId);
 }
