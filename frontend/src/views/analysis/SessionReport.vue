@@ -37,7 +37,8 @@ const generatingTitle = computed(() => {
   if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
   return 'AI 正在准备分析报告…'
 })
-const GENERATE_TIMEOUT = 180 // 生成超时（秒）
+const GENERATE_TIMEOUT = 300 // 生成总超时（秒）
+const IDLE_TIMEOUT = 60 // 空闲超时（秒）：超过该时长无任何输出则判定中断
 let generateTimer = null
 let eventSource = null
 let streamDone = false // SSE 已收到 done（避免 error 事件误触发轮询）
@@ -297,11 +298,18 @@ function startStreamingAnalysis(force = false) {
   streamText.value = ''
   streamReasoning.value = ''
   if (eventSource) eventSource.close()
-  // 倒计时（SSE 中断兜底）
+  // 超时策略：空闲超时（无任何输出 60 秒）+ 总超时（300 秒），有输出则持续等待
+  let lastOutputAt = Date.now()
   if (generateTimer) clearInterval(generateTimer)
   generateTimer = setInterval(() => {
     generateElapsed.value += 1
-    if (generateElapsed.value >= GENERATE_TIMEOUT && !streamDone) {
+    if (streamDone) return
+    if (Date.now() - lastOutputAt > IDLE_TIMEOUT * 1000) {
+      stopStreamingAnalysis()
+      generateTimedOut.value = true
+      return
+    }
+    if (generateElapsed.value >= GENERATE_TIMEOUT) {
       stopStreamingAnalysis()
       generateTimedOut.value = true
     }
@@ -313,10 +321,16 @@ function startStreamingAnalysis(force = false) {
       : `/api/analysis/stream/${sessionId}`
     eventSource = new EventSource(url)
     eventSource.addEventListener('reasoning', (e) => {
-      if (e.data) streamReasoning.value += e.data
+      if (e.data) {
+        streamReasoning.value += e.data
+        lastOutputAt = Date.now()
+      }
     })
     eventSource.addEventListener('delta', (e) => {
-      if (e.data) streamText.value += e.data
+      if (e.data) {
+        streamText.value += e.data
+        lastOutputAt = Date.now()
+      }
     })
     eventSource.addEventListener('done', (e) => {
       streamDone = true

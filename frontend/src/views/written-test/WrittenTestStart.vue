@@ -16,8 +16,8 @@ const timeLimit = ref(60)
 const questionCount = ref(12)
 
 // 出题等待状态
-const WAIT_TIMEOUT = 150 // 总等待上限（秒）
-const IDLE_TIMEOUT = 30 // 流式空闲超时（秒，无新内容则判定中断）
+const WAIT_TIMEOUT = 300 // 总等待上限（秒）
+const IDLE_TIMEOUT = 60 // 流式空闲超时（秒，无新内容则判定中断）
 const waiting = ref(false)
 const elapsed = ref(0)
 const idleElapsed = ref(0)
@@ -49,7 +49,7 @@ function startTimers() {
   }, 1000)
   idleTimer = setInterval(() => {
     idleElapsed.value += 1
-    if (idleElapsed.value >= IDLE_TIMEOUT && waiting.value && !finished && streamText.value) {
+    if (idleElapsed.value >= IDLE_TIMEOUT && waiting.value && !finished && (streamText.value || streamReasoning.value)) {
       abortByTimeout('AI 出题中断（' + IDLE_TIMEOUT + ' 秒无新内容），请重试')
     }
   }, 1000)
