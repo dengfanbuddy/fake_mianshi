@@ -185,7 +185,7 @@ function initExam(list, deadline) {
   }
   loaded.value = true
   startCountdown(deadline)
-})
+}
 
 onBeforeUnmount(() => {
   stopCountdown()

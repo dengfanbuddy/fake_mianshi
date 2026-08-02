@@ -819,13 +819,10 @@ onMounted(() => {
 .resume-item:last-child {
   margin-bottom: 0;
 }
-.resume-info {
+.resume-bar .resume-info {
   font-size: 13px;
   color: #606266;
   flex: 1;
-}
-
-  min-height: 60px;
 }
 
 /* 简历 */
