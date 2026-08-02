@@ -74,7 +74,19 @@ public class AnalysisServiceImpl implements AnalysisService {
             7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
             8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）；
             9. 每个评分维度都要给出打分依据：accuracyReason/depthReason/clarityReason/fluencyReason（各 30-80 字，具体指出回答中得分点和扣分点，如"答案正确但未展开锁升级细节，故深度不足"，让候选人明白为什么是这个分数）。
-            请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
+
+            【输出要求】分两部分输出：
+            第一部分（Markdown 展示）：先用 Markdown 格式输出一份完整可读的分析报告，包含以下小节：
+            ## 总体评价（overallScore 得分、能力等级、期望薪资区间）
+            ## 优点
+            ## 不足
+            ## 知识盲区与学习要点（每个盲区列出知识点与核心答案要点，便于直接学习）
+            ## 逐题点评（每题：题目、各维度得分、点评、改进建议；简答题附参考答案要点）
+            ## 改进计划
+            内容需与第二部分 JSON 保持一致，供候选人边生成边阅读。
+
+            第二部分（结构化数据）：展示部分结束后，单独一行输出 ==JSON_START==，
+            其后输出严格 JSON（不要任何其他文字、Markdown 代码块围栏或注释），结构如下：
             {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"accuracyReason":"依据","depth":0-10,"depthReason":"依据","clarity":0-10,"clarityReason":"依据","fluency":0-10,"fluencyReason":"依据","tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一道笔试题，questionContent 请原样引用题目内容，便于程序匹配；
@@ -95,7 +107,18 @@ public class AnalysisServiceImpl implements AnalysisService {
             7. personalitySummary 总结候选人性格与工作风格（100 字内）；characterTraits 列出 2-4 个性格特质；characterDefects 列出 1-3 个性格/习惯缺陷及改进方法；
             8. questionAnalyses 每项给出 category（技术分类，如 JVM/并发/Spring/数据库）、difficulty（难度：初级/中级/高级）、focusPoint（本题考察的方向与能力）、answerApproach（这类题的回答思路，给面试者方法论）、example（一个优秀回答示例片段）；
             9. 每个评分维度都要给出打分依据：accuracyReason/depthReason/clarityReason/fluencyReason（各 30-80 字，具体指出回答中得分点和扣分点，如"答案正确但未展开锁升级细节，故深度不足"，让候选人明白为什么是这个分数）。
-            请严格返回如下 JSON 结构，不要输出任何额外文字或 Markdown 代码块：
+            【输出要求】分两部分输出：
+            第一部分（Markdown 展示）：先用 Markdown 格式输出一份完整可读的分析报告，包含以下小节：
+            ## 总体评价（overallScore 得分、能力等级、期望薪资区间）
+            ## 优点
+            ## 不足
+            ## 知识盲区与学习要点（每个盲区列出知识点与核心答案要点，便于直接学习）
+            ## 逐题点评（每题：题目、各维度得分、点评、改进建议）
+            ## 改进计划
+            内容需与第二部分 JSON 保持一致，供候选人边生成边阅读。
+
+            第二部分（结构化数据）：展示部分结束后，单独一行输出 ==JSON_START==，
+            其后输出严格 JSON（不要任何其他文字、Markdown 代码块围栏或注释），结构如下：
             {"overallScore":0-100,"overallLevel":"...","expectedSalaryRange":"...","strengths":["..."],"weaknesses":["..."],"knowledgeGaps":[{"point":"知识点","explanation":"答案要点"}],"personalitySummary":"...","characterTraits":["..."],"characterDefects":[{"defect":"缺陷","improvement":"改进方法"}],"communicationEvaluation":"...","improvementPlan":{"topics":[{"topic":"学习方向","action":"具体做法","example":"实例"}],"suggestions":["建议"]},"questionAnalyses":[{"questionContent":"...","answerContent":"...","category":"技术分类","difficulty":"难度","focusPoint":"考察方向","accuracy":0-10,"accuracyReason":"依据","depth":0-10,"depthReason":"依据","clarity":0-10,"clarityReason":"依据","fluency":0-10,"fluencyReason":"依据","tone":"","answerApproach":"回答思路","example":"优秀示例","improvementSuggestion":"..."}]}
             说明：
             - questionAnalyses 每项对应一轮问答，questionContent 请引用面试官的原问题；
@@ -154,6 +177,17 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Override
     @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {
+        return analyzeSessionInternal(sessionId, null);
+    }
+
+    @Override
+    @Transactional
+    public SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta) {
+        return analyzeSessionInternal(sessionId, onDelta);
+    }
+
+    /** 分析主流程：LLM 生成（可选流式）→ 解析 JSON 存库 → 更新弱点标签 */
+    private SessionAnalysis analyzeSessionInternal(Long sessionId, java.util.function.Consumer<String> onDelta) {
         InterviewSession session = Optional.ofNullable(sessionRepository.selectById(sessionId))
                 .orElseThrow(() -> new BusinessException("面试会话不存在: id=" + sessionId));
 
@@ -166,9 +200,13 @@ public class AnalysisServiceImpl implements AnalysisService {
         String type = session.getType();
         JsonNode analysisNode;
         if (TYPE_WRITTEN.equals(type)) {
-            analysisNode = callLlm(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId));
+            analysisNode = onDelta == null
+                    ? callLlm(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId))
+                    : callLlmStream(WRITTEN_SYSTEM_PROMPT, buildWrittenUserPrompt(sessionId), onDelta);
         } else if (TYPE_MOCK.equals(type)) {
-            analysisNode = callLlm(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId));
+            analysisNode = onDelta == null
+                    ? callLlm(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId))
+                    : callLlmStream(MOCK_SYSTEM_PROMPT, buildMockUserPrompt(sessionId), onDelta);
         } else {
             throw new BusinessException("不支持的会话类型: " + type);
         }
@@ -327,8 +365,20 @@ public class AnalysisServiceImpl implements AnalysisService {
     /** 调用 LLM 并将返回内容提取、解析为 JSON 对象，带分层容错；分析报告输出较长，使用大 max_tokens */
     private JsonNode callLlm(String systemPrompt, String userPrompt) {
         LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
-        String raw = response.getContent();
-        String json = JsonExtractor.extractJsonObject(raw);
+        return parseAnalysisJson(response.getContent());
+    }
+
+    /** 流式调用 LLM：增量文本经 onDelta 推送（供 SSE 实时展示），返回解析后的 JSON 节点 */
+    private JsonNode callLlmStream(String systemPrompt, String userPrompt,
+                                   java.util.function.Consumer<String> onDelta) {
+        String raw = llmService.chatStream(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS, onDelta);
+        return parseAnalysisJson(raw);
+    }
+
+    /** 从双输出中提取 ==JSON_START== 之后的 JSON 部分并解析为对象 */
+    private JsonNode parseAnalysisJson(String raw) {
+        int idx = raw.indexOf("==JSON_START==");
+        String json = idx >= 0 ? raw.substring(idx + "==JSON_START==".length()) : raw;
         try {
             JsonNode node = OBJECT_MAPPER.readTree(json);
             if (node == null || !node.isObject()) {

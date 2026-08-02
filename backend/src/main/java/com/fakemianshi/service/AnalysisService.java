@@ -21,6 +21,12 @@ public interface AnalysisService {
     SessionAnalysis analyzeSession(Long sessionId);
 
     /**
+     * 流式生成会话分析：LLM 以「markdown 展示 + ==JSON_START== + JSON」双输出，
+     * 增量文本经 onDelta 回调推送（供 SSE 实时展示），返回保存后的分析。
+     */
+    SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta);
+
+    /**
      * 单题分析。MVP 简化：analyzeSession 时已一并生成，本方法直接查询已保存的分析。
      */
     List<QuestionAnalysis> analyzeQuestions(Long sessionId);

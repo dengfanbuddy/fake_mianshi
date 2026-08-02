@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { marked } from 'marked'
 import {
   getSessionAnalysis,
   getMockMessages,
@@ -27,12 +28,18 @@ const messageLoading = ref(false)
 const dialogVisible = ref(false)
 const refreshing = ref(false)
 
-// 分析生成中轮询状态
+// 分析生成中：SSE 流式展示（markdown 实时渲染），失败回落轮询
 const generating = ref(false)
 const generateElapsed = ref(0)
 const generateTimedOut = ref(false)
+const streamText = ref('')
+const streamRendered = computed(() =>
+  marked.parse(streamText.value || '正在连接 AI，开始生成分析报告…')
+)
 const GENERATE_TIMEOUT = 180 // 生成超时（秒）
 let generateTimer = null
+let eventSource = null
+let streamDone = false // SSE 已收到 done（避免 error 事件误触发轮询）
 
 // 单题折叠面板展开项
 const activeNames = ref([])
@@ -257,10 +264,10 @@ async function fetchAll() {
   // 笔试/面试：默认展开全部单题
   activeNames.value = mergedQuestions.value.map((_, i) => i)
 
-  // 加载分析：未生成则进入轮询等待（后端已异步触发生成）
+  // 加载分析：未生成则打开 SSE 流式等待（实时展示 AI 生成过程）
   const ok = await fetchAnalysisOnce()
   if (!ok) {
-    startGeneratePolling()
+    startStreamingAnalysis()
   }
   loading.value = false
 }
@@ -278,6 +285,68 @@ async function fetchAnalysisOnce() {
     // 拦截器已提示（分析不存在时后端返回成功+null，不走异常）
     return false
   }
+}
+
+/** 分析未生成时打开 SSE 流：实时渲染 AI 生成的分析内容，done 后展示完整报告 */
+function startStreamingAnalysis() {
+  generating.value = true
+  generateElapsed.value = 0
+  generateTimedOut.value = false
+  streamDone = false
+  streamText.value = ''
+  // 倒计时（SSE 中断兜底）
+  if (generateTimer) clearInterval(generateTimer)
+  generateTimer = setInterval(() => {
+    generateElapsed.value += 1
+    if (generateElapsed.value >= GENERATE_TIMEOUT && !streamDone) {
+      stopStreamingAnalysis()
+      generateTimedOut.value = true
+    }
+  }, 1000)
+
+  try {
+    eventSource = new EventSource(`/api/analysis/stream/${sessionId}`)
+    eventSource.addEventListener('delta', (e) => {
+      if (e.data) streamText.value += e.data
+    })
+    eventSource.addEventListener('done', (e) => {
+      streamDone = true
+      try {
+        const dto = JSON.parse(e.data)
+        if (dto) {
+          analysis.value = dto
+          stopStreamingAnalysis()
+          return
+        }
+      } catch (err) {
+        // data 解析失败，回落轮询
+      }
+      stopStreamingAnalysis()
+      startGeneratePolling()
+    })
+    eventSource.addEventListener('error', () => {
+      // done 已收到时连接关闭是正常现象；否则（连接失败/中断）回落轮询
+      if (!streamDone && !analysis.value) {
+        stopStreamingAnalysis()
+        if (!generateTimedOut.value) startGeneratePolling()
+      }
+    })
+  } catch (e) {
+    stopStreamingAnalysis()
+    startGeneratePolling()
+  }
+}
+
+function stopStreamingAnalysis() {
+  if (generateTimer) {
+    clearInterval(generateTimer)
+    generateTimer = null
+  }
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+  generating.value = false
 }
 
 /** 分析未生成时轮询等待，每 5 秒一次，超时后停止并提示 */
@@ -354,7 +423,10 @@ function playReplay(audioPath) {
 
 onMounted(fetchAll)
 
-onBeforeUnmount(stopGeneratePolling)
+onBeforeUnmount(() => {
+  stopStreamingAnalysis()
+  stopGeneratePolling()
+})
 </script>
 
 <template>
@@ -383,12 +455,15 @@ onBeforeUnmount(stopGeneratePolling)
     </header>
 
     <main class="report-body" v-loading="loading">
-      <!-- 分析生成中：进度提示 + 自动轮询 -->
+      <!-- 分析生成中：SSE 流式实时展示 -->
       <div v-if="generating" class="generating-panel">
-        <el-icon :size="44" class="is-loading" color="#409eff"><Loading /></el-icon>
-        <div class="gen-title">AI 正在生成分析报告</div>
-        <div class="gen-sub">通常需要 30-60 秒，生成完成后会自动展示，请稍候…</div>
-        <div class="gen-elapsed">已等待 {{ generateElapsed }} 秒</div>
+        <div class="gen-header">
+          <el-icon :size="20" class="is-loading" color="#409eff"><Loading /></el-icon>
+          <span class="gen-title">AI 正在生成分析报告，边写边展示…</span>
+          <span class="gen-elapsed">已等待 {{ generateElapsed }} 秒</span>
+        </div>
+        <div class="gen-stream markdown-body" v-html="streamRendered"></div>
+        <div class="gen-sub">生成完成后自动切换为完整报告，无需操作。</div>
       </div>
       <!-- 生成超时：提示稍后刷新 -->
       <div v-else-if="generateTimedOut && !analysis" class="generating-panel">
@@ -781,26 +856,66 @@ onBeforeUnmount(stopGeneratePolling)
 .generating-panel {
   background: #fff;
   border-radius: 12px;
-  padding: 56px 24px;
+  padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
+.gen-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .gen-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: #303133;
+  flex: 1;
 }
 .gen-sub {
-  font-size: 13px;
-  color: #606266;
+  font-size: 12px;
+  color: #909399;
   text-align: center;
 }
 .gen-elapsed {
   font-size: 12px;
   color: #909399;
+  white-space: nowrap;
+}
+.gen-stream {
+  max-height: 52vh;
+  overflow-y: auto;
+  background: #fafbfc;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #303133;
+}
+.gen-stream h1,
+.gen-stream h2,
+.gen-stream h3,
+.gen-stream h4 {
+  font-size: 14px;
+  margin: 10px 0 4px;
+  color: #303133;
+}
+.gen-stream ul,
+.gen-stream ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.gen-stream p {
+  margin: 4px 0;
+}
+.gen-stream code {
+  background: #f0f2f5;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
 }
 
 .card {
