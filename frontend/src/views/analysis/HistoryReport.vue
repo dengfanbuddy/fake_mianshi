@@ -43,6 +43,7 @@ const trends = computed(() => (report.value?.trends || []).map((t) => {
 const recurringWeaknesses = computed(() => report.value?.recurringWeaknesses || [])
 const recommendedFocus = computed(() => report.value?.recommendedFocus || [])
 const overallProgress = computed(() => report.value?.overallProgress || '')
+const humorSummary = computed(() => report.value?.humorSummary || '')
 
 const upCount = computed(() => trends.value.filter((t) => t.trend === '上升').length)
 const flatCount = computed(() => trends.value.filter((t) => t.trend === '平稳').length)
@@ -172,6 +173,15 @@ onMounted(fetchHistory)
             <h3 class="card-title">整体进步评价</h3>
             <p v-if="overallProgress" class="progress-text">{{ overallProgress }}</p>
             <el-empty v-else description="暂无整体评价" :image-size="60" />
+          </div>
+        </section>
+
+        <!-- 幽默总结卡 -->
+        <section v-if="humorSummary" class="card humor-card">
+          <div class="humor-emoji">😄</div>
+          <div class="humor-content">
+            <div class="humor-title">面试官大实话</div>
+            <div class="humor-text">{{ humorSummary }}</div>
           </div>
         </section>
 
@@ -306,6 +316,31 @@ onMounted(fetchHistory)
 }
 
 /* ---------- 整体评价 ---------- */
+.humor-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(135deg, #fdf6ec 0%, #fff7e6 100%);
+  border: 1px solid #f3d19e;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.humor-emoji {
+  font-size: 34px;
+  line-height: 1;
+}
+.humor-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b88230;
+  margin-bottom: 4px;
+}
+.humor-text {
+  font-size: 15px;
+  color: #7a5c1e;
+  line-height: 1.6;
+}
 .progress-card {
   display: flex;
   gap: 18px;

@@ -95,6 +95,7 @@ const communicationEvaluation = computed(() => analysis.value?.communicationEval
 
 // 新增字段：等级 / 薪资 / 性格
 const overallLevel = computed(() => analysis.value?.overallLevel || '')
+const humorSummary = computed(() => analysis.value?.humorSummary || '')
 const expectedSalaryRange = computed(() => analysis.value?.expectedSalaryRange || '')
 const personalitySummary = computed(() => analysis.value?.personalitySummary || '')
 const characterTraits = computed(() => analysis.value?.characterTraits || [])
@@ -600,6 +601,15 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
+        <!-- 幽默总结卡 -->
+        <section v-if="humorSummary" class="card humor-card">
+          <div class="humor-emoji">😄</div>
+          <div class="humor-content">
+            <div class="humor-title">面试官大实话</div>
+            <div class="humor-text">{{ humorSummary }}</div>
+          </div>
+        </section>
+
         <!-- 2. 优势 / 弱项 -->
         <section v-if="strengths.length || weaknesses.length" class="grid-2">
           <div class="card">
@@ -1031,6 +1041,30 @@ onBeforeUnmount(() => {
 }
 
 /* ---------- 概览卡 ---------- */
+.humor-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: linear-gradient(135deg, #fdf6ec 0%, #fff7e6 100%);
+  border: 1px solid #f3d19e;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+.humor-emoji {
+  font-size: 34px;
+  line-height: 1;
+}
+.humor-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #b88230;
+  margin-bottom: 4px;
+}
+.humor-text {
+  font-size: 15px;
+  color: #7a5c1e;
+  line-height: 1.6;
+}
 .overview-card {
   display: flex;
   align-items: center;

@@ -29,6 +29,9 @@ public class AnalysisResultDTO {
     /** 能力等级（如 中级工程师） */
     private String overallLevel;
 
+    /** 幽默化总结（AI 根据能力水平给出善意的调侃/夸赞） */
+    private String humorSummary;
+
     /** 预期薪资范围（如 20k-30k） */
     private String expectedSalaryRange;
 
