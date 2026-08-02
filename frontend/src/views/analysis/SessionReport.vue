@@ -325,6 +325,12 @@ function startStreamingAnalysis(force = false) {
       stallCheck = 0
       stalled.value = false
     }
+    // SSE 连接后 8 秒仍无任何输出（delta/reasoning）→ 自动切轮询兜底，保证有反馈
+    if (generateElapsed.value >= 8 && !streamDone && !streamText.value && !streamReasoning.value) {
+      stopStreamingAnalysis()
+      startGeneratePolling()
+      return
+    }
     if (Date.now() - lastOutputAt > IDLE_TIMEOUT * 1000) {
       stopStreamingAnalysis()
       generateTimedOut.value = true
@@ -513,7 +519,7 @@ onBeforeUnmount(() => {
             </div>
           </template>
           <template v-else-if="stalled">AI 输出似乎停滞（{{ IDLE_TIMEOUT }} 秒无新内容），仍在等待…</template>
-          <template v-else>正在连接 AI，开始生成分析报告…</template>
+          <template v-else>AI 正在生成分析报告，请稍候（自动刷新等待中）…</template>
         </div>
         <div class="gen-sub">生成完成后自动切换为格式化报告，无需操作。</div>
       </div>

@@ -50,7 +50,10 @@ public class WrittenTestController {
      */
     @PostMapping(value = "/stream-start/{projectId}", produces = "text/event-stream")
     public SseEmitter streamStart(@PathVariable Long projectId,
-                                  @RequestBody(required = false) WrittenTestStartRequest req) {
+                                  @RequestBody(required = false) WrittenTestStartRequest req,
+                                  jakarta.servlet.http.HttpServletResponse response) {
+        // 禁用缓存：避免浏览器/代理缓存 SSE 响应导致重复回放
+        response.setHeader("Cache-Control", "no-cache, no-transform");
         SseEmitter emitter = new SseEmitter(300_000L);
         sseExecutor.execute(() -> {
             try {

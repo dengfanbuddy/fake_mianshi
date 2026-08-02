@@ -55,7 +55,10 @@ public class AnalysisController {
      */
     @GetMapping(value = "/stream/{sessionId}", produces = "text/event-stream")
     public SseEmitter streamSession(@PathVariable Long sessionId,
-                                    @RequestParam(defaultValue = "false") boolean force) {
+                                    @RequestParam(defaultValue = "false") boolean force,
+                                    jakarta.servlet.http.HttpServletResponse response) {
+        // 禁用缓存：避免浏览器/代理缓存 SSE 响应导致重复回放
+        response.setHeader("Cache-Control", "no-cache, no-transform");
         SseEmitter emitter = new SseEmitter(420_000L);
 
         // 分析已存在：非强制时直接返回完整报告；强制时删除旧分析重新生成
