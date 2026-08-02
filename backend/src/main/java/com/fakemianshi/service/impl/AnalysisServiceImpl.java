@@ -377,10 +377,20 @@ public class AnalysisServiceImpl implements AnalysisService {
         return parseAnalysisJson(raw);
     }
 
-    /** 从双输出中提取 ==JSON_START== 之后的 JSON 部分并解析为对象 */
+    /** 提取并解析 LLM 输出的 JSON 对象：容错处理 ```json 代码块围栏、==JSON_START== 标记及前后缀杂文本 */
     private JsonNode parseAnalysisJson(String raw) {
-        int idx = raw.indexOf("==JSON_START==");
-        String json = idx >= 0 ? raw.substring(idx + "==JSON_START==".length()) : raw;
+        String json = raw == null ? "" : raw.trim();
+        // 优先取 ==JSON_START== 标记之后的部分（历史双输出格式）
+        int markIdx = json.indexOf("==JSON_START==");
+        if (markIdx >= 0) {
+            json = json.substring(markIdx + "==JSON_START==".length()).trim();
+        }
+        // 提取首个 { 到最后一个 } 之间的 JSON 主体：跳过 ```json 围栏与前后缀文本
+        int start = json.indexOf('{');
+        int end = json.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            json = json.substring(start, end + 1);
+        }
         try {
             JsonNode node = OBJECT_MAPPER.readTree(json);
             if (node == null || !node.isObject()) {
