@@ -14,6 +14,7 @@ import { getVoiceStatus, getVoiceConfig, saveVoiceConfig } from '../api/voice'
 const voiceConfigured = ref(null) // null=加载中, true/false
 const appIdConfigured = ref(false)
 const voiceForm = ref({ secretId: '', secretKey: '', appId: '' })
+const voiceMaskedId = ref('') // 已配置 SecretId 的脱敏回显（仅展示，不回传）
 const voiceSaving = ref(false)
 
 async function fetchVoiceStatus() {
@@ -28,12 +29,13 @@ async function fetchVoiceStatus() {
   }
 }
 
-// 回显当前生效的语音配置（密钥脱敏）
+// 回显当前生效的语音配置（密钥脱敏；SecretId/SecretKey 不回填输入框，避免把脱敏值误存回库）
 async function fetchVoiceConfig() {
   try {
     const res = await getVoiceConfig()
     if (res.code === 200 && res.data) {
-      voiceForm.value.secretId = res.data.secretId || ''
+      voiceMaskedId.value = res.data.secretId || ''
+      voiceForm.value.secretId = ''
       voiceForm.value.secretKey = ''
       voiceForm.value.appId = res.data.appId || ''
     }
@@ -54,7 +56,8 @@ async function saveVoiceConfigAction() {
     })
     if (res.code === 200) {
       ElMessage.success('语音配置已保存并激活，立即生效')
-      voiceForm.value.secretId = res.data?.secretId || ''
+      voiceMaskedId.value = res.data?.secretId || ''
+      voiceForm.value.secretId = ''
       voiceForm.value.secretKey = ''
       voiceForm.value.appId = res.data?.appId || ''
       await fetchVoiceStatus()
@@ -308,19 +311,20 @@ onMounted(() => {
         <el-form-item label="SecretId">
           <el-input
             v-model="voiceForm.secretId"
-            placeholder="腾讯云 SecretId（留空表示保留原值）"
+            placeholder="留空保留原值，填写新值则覆盖"
             show-password
           />
+          <div v-if="voiceMaskedId" class="hint">已配置：{{ voiceMaskedId }}</div>
         </el-form-item>
         <el-form-item label="SecretKey">
           <el-input
             v-model="voiceForm.secretKey"
-            placeholder="腾讯云 SecretKey（留空表示保留原值）"
+            placeholder="留空保留原值，填写新值则覆盖"
             show-password
           />
         </el-form-item>
         <el-form-item label="AppId">
-          <el-input v-model="voiceForm.appId" placeholder="腾讯云 AppId（可选，录音文件识别用）" />
+          <el-input v-model="voiceForm.appId" placeholder="腾讯云 AppId（实时语音识别需要）" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="voiceSaving" @click="saveVoiceConfigAction">

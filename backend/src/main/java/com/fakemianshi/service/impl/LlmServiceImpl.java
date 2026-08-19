@@ -129,6 +129,22 @@ public class LlmServiceImpl implements LlmService {
         return doPostStream(config, requestJson, onDelta, onReasoning);
     }
 
+    @Override
+    public String chatStream(List<Message> messages, int maxTokens,
+                             java.util.function.Consumer<String> onDelta,
+                             java.util.function.Consumer<String> onReasoning) {
+        AIModelConfig config = configRepository.findByIsActiveTrue()
+                .orElseThrow(() -> new BusinessException("未配置可用的AI模型，请在设置中配置"));
+
+        String requestJson;
+        try {
+            requestJson = buildRequestBody(config, messages, maxTokens, true);
+        } catch (JacksonException e) {
+            throw new BusinessException("AI模型请求体构建失败: " + e.getMessage(), e);
+        }
+        return doPostStream(config, requestJson, onDelta, onReasoning);
+    }
+
     /**
      * 构建 OpenAI 兼容的 chat/completions 请求体（model, messages, temperature, max_tokens, stream）。
      */

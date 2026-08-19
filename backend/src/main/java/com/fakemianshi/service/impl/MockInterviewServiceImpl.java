@@ -22,9 +22,13 @@ import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.VoiceService;
 import com.fakemianshi.util.AudioStorageUtil;
+import com.fakemianshi.util.SentenceSplitter;
+import com.fakemianshi.util.SpokenTextUtil;
+import com.fakemianshi.util.WavAudio;
 import com.fakemianshi.service.LlmService;
 import com.fakemianshi.service.MockInterviewService;
 import com.fakemianshi.service.PersonaService;
+import com.fakemianshi.service.StreamEventSink;
 import com.fakemianshi.service.PositionRequirementService;
 import com.fakemianshi.service.ProjectService;
 import com.fakemianshi.service.QuestionGenerationService;
@@ -40,6 +44,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.ByteArrayOutputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -156,42 +161,203 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     @Override
     @Transactional
     public MockInterviewRespondResponse respond(Long sessionId, MockInterviewRespondRequest req) {
-        // 1. 校验会话存在且进行中
         InterviewSession session = requireActiveSession(sessionId);
+        requireUserText(req);
+
+        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
+        InterviewerPersona persona = resolveCurrentPersona(sessionId);
+        String outline = getOutline(sessionId, session.getProjectId());
+        List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+
+        LlmResponse llmResponse = llmService.chat(messages);
+        return finalizeReply(sessionId, persona, userMessage,
+                llmResponse.getContent() == null ? "" : llmResponse.getContent());
+    }
+
+    @Override
+    public MockInterviewRespondResponse respondStreaming(Long sessionId, MockInterviewRespondRequest req,
+                                                         java.util.function.Consumer<String> onDelta,
+                                                         java.util.function.Consumer<String> onReasoning) {
+        InterviewSession session = requireActiveSession(sessionId);
+        requireUserText(req);
+
+        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
+        InterviewerPersona persona = resolveCurrentPersona(sessionId);
+        String outline = getOutline(sessionId, session.getProjectId());
+        List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+
+        String fullReply = llmService.chatStream(messages, LlmServiceImpl.DEFAULT_MAX_TOKENS, onDelta, onReasoning);
+        return finalizeReply(sessionId, persona, userMessage, fullReply == null ? "" : fullReply);
+    }
+
+    @Override
+    public void streamInterviewReply(Long sessionId, MockInterviewRespondRequest req, StreamEventSink sink) {
+        try {
+            InterviewSession session = requireActiveSession(sessionId);
+            requireUserText(req);
+
+            MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
+            InterviewerPersona persona = resolveCurrentPersona(sessionId);
+            String outline = getOutline(sessionId, session.getProjectId());
+            List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+            String styleConfig = persona == null ? null : persona.getStyleConfig();
+
+            // 累积流式合成出的 PCM，用于落盘回放，避免结束后再重复合成全文
+            ByteArrayOutputStream audioAccum = new ByteArrayOutputStream();
+            StreamEventSink wrappedSink = new StreamEventSink() {
+                @Override
+                public void onTextDelta(String delta) {
+                    if (sink != null) {
+                        sink.onTextDelta(delta);
+                    }
+                }
+
+                @Override
+                public void onAudio(byte[] pcmChunk) {
+                    audioAccum.writeBytes(pcmChunk);
+                    if (sink != null) {
+                        sink.onAudio(pcmChunk);
+                    }
+                }
+
+                @Override
+                public void onDone(MockInterviewRespondResponse response) {
+                    if (sink != null) {
+                        sink.onDone(response);
+                    }
+                }
+
+                @Override
+                public void onError(String message) {
+                    if (sink != null) {
+                        sink.onError(message);
+                    }
+                }
+            };
+
+            StringBuilder sentenceBuf = new StringBuilder();
+            String fullReply = llmService.chatStream(messages, LlmServiceImpl.DEFAULT_MAX_TOKENS,
+                    delta -> {
+                        if (delta == null || delta.isEmpty()) {
+                            return;
+                        }
+                        wrappedSink.onTextDelta(delta);
+                        sentenceBuf.append(delta);
+                        streamCompletedSentences(sentenceBuf, styleConfig, wrappedSink);
+                    },
+                    null);
+            // 收尾残留半句
+            streamCompletedSentences(sentenceBuf, styleConfig, wrappedSink);
+
+            byte[] fullAudio = audioAccum.size() > 0
+                    ? WavAudio.pcmToWav(audioAccum.toByteArray(), WavAudio.SAMPLE_RATE, WavAudio.CHANNELS, WavAudio.BITS_PER_SAMPLE)
+                    : new byte[0];
+
+            MockInterviewRespondResponse response = finalizeReply(sessionId, persona, userMessage,
+                    fullReply == null ? "" : fullReply, fullAudio);
+            wrappedSink.onDone(response);
+        } catch (Exception e) {
+            if (sink != null) {
+                sink.onError(e.getMessage() == null ? "流式面试失败" : e.getMessage());
+            }
+        }
+    }
+
+    /** 从缓冲区提取完整句（句末标点或超长硬切），逐句流式 TTS 推送 */
+    private void streamCompletedSentences(StringBuilder buffer, String styleConfig, StreamEventSink sink) {
+        int idx;
+        while ((idx = indexOfEndMark(buffer)) >= 0) {
+            String sentence = buffer.substring(0, idx + 1);
+            buffer.delete(0, idx + 1);
+            streamTtsSentence(sentence.trim(), styleConfig, sink);
+        }
+        while (buffer.length() >= SentenceSplitter.DEFAULT_MAX_CHARS) {
+            String chunk = buffer.substring(0, SentenceSplitter.DEFAULT_MAX_CHARS);
+            buffer.delete(0, SentenceSplitter.DEFAULT_MAX_CHARS);
+            streamTtsSentence(chunk.trim(), styleConfig, sink);
+        }
+    }
+
+    private int indexOfEndMark(StringBuilder buffer) {
+        for (int i = 0; i < buffer.length(); i++) {
+            char c = buffer.charAt(i);
+            if (c == '。' || c == '！' || c == '？' || c == '；' || c == '!' || c == '?' || c == ';' || c == '\n') {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** 单句 TTS，PCM 分片经 sink.onAudio 推送；失败静默跳过（文字仍正常展示） */
+    private void streamTtsSentence(String text, String styleConfig, StreamEventSink sink) {
+        if (text == null || text.isBlank() || sink == null) {
+            return;
+        }
+        try {
+            // 用基础合成（TextToVoice，音色可控、稳定）逐句合成 wav，再拆成 PCM 分片推送
+            byte[] wav = voiceService.synthesizeSpeech(text, styleConfig);
+            WavAudio.PcmInfo info = WavAudio.parse(wav);
+            if (info == null || info.pcm().length == 0) {
+                return;
+            }
+            byte[] pcm = info.pcm();
+            int chunkSize = 3200; // 约 100ms @16k/16bit/单声道
+            for (int i = 0; i < pcm.length; i += chunkSize) {
+                int len = Math.min(chunkSize, pcm.length - i);
+                byte[] chunk = new byte[len];
+                System.arraycopy(pcm, i, chunk, 0, len);
+                sink.onAudio(chunk);
+            }
+        } catch (Exception e) {
+            log.warn("逐句 TTS 失败，跳过本句语音: {}", e.getMessage());
+        }
+    }
+
+    /** 校验回答内容非空 */
+    private void requireUserText(MockInterviewRespondRequest req) {
         if (req == null || req.getUserText() == null || req.getUserText().isBlank()) {
             throw new BusinessException("回答内容不能为空");
         }
+    }
 
-        // 2. 保存候选人消息
+    /** 保存候选人消息 */
+    private MockInterviewMessage saveCandidateMessage(Long sessionId, MockInterviewRespondRequest req) {
         MockInterviewMessage userMessage = new MockInterviewMessage();
         userMessage.setSessionId(sessionId);
         userMessage.setRole(ROLE_CANDIDATE);
         userMessage.setContent(req.getUserText());
         userMessage.setAudioPath(req.getAudioPath());
         messageRepository.insert(userMessage);
-        
-        // 3. 确定当前面试官人设（最新一条 INTERVIEWER 消息的 personaId）
-        InterviewerPersona persona = resolveCurrentPersona(sessionId);
+        return userMessage;
+    }
 
-        // 4. 构建 LLM 对话：system + 完整历史
-        String outline = getOutline(sessionId, session.getProjectId());
-        List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+    /**
+     * 解析换人标记、净化（去代码）、保存面试官消息并组装响应。
+     * 供非流式 {@link #respond} 与流式 {@link #respondStreaming} 复用。
+     */
+    private MockInterviewRespondResponse finalizeReply(Long sessionId, InterviewerPersona persona,
+                                                       MockInterviewMessage userMessage, String rawReply) {
+        return finalizeReply(sessionId, persona, userMessage, rawReply, null);
+    }
 
-        LlmResponse llmResponse = llmService.chat(messages);
-        StringBuilder replyBuilder = new StringBuilder(llmResponse.getContent() == null ? "" : llmResponse.getContent());
-
-        // 5.1 解析"建议换面试官"标记：【建议换面试官:ID】，剥离标记并校验
+    private MockInterviewRespondResponse finalizeReply(Long sessionId, InterviewerPersona persona,
+                                                       MockInterviewMessage userMessage, String rawReply,
+                                                       byte[] preSynthesizedAudio) {
+        StringBuilder replyBuilder = new StringBuilder(rawReply == null ? "" : rawReply);
         Long suggestedPersonaId = parseAndStripSwitchSuggestion(replyBuilder, persona);
-        String cleanReply = replyBuilder.toString().trim();
+        String cleanReply = SpokenTextUtil.sanitizeForSpeech(replyBuilder.toString());
 
-        // 5. 保存面试官消息（同时合成并保存面试官语音，失败不阻断面试）
         MockInterviewMessage aiMessage = new MockInterviewMessage();
         aiMessage.setSessionId(sessionId);
         aiMessage.setRole(ROLE_INTERVIEWER);
         aiMessage.setContent(cleanReply);
         aiMessage.setPersonaId(persona.getId());
         if (!cleanReply.startsWith("【面试结束】")) {
-            aiMessage.setAudioPath(saveInterviewerAudio(cleanReply, sessionId, persona));
+            if (preSynthesizedAudio != null && preSynthesizedAudio.length > 0) {
+                aiMessage.setAudioPath(saveInterviewerAudioBytes(preSynthesizedAudio, sessionId));
+            } else {
+                aiMessage.setAudioPath(saveInterviewerAudio(cleanReply, sessionId, persona));
+            }
         }
         messageRepository.insert(aiMessage);
 
@@ -202,6 +368,19 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         return response;
     }
 
+    /** 保存已合成的面试官语音字节（流式模式下复用流式合成结果，避免重复合成） */
+    private String saveInterviewerAudioBytes(byte[] audio, Long sessionId) {
+        try {
+            if (audio == null || audio.length == 0) {
+                return null;
+            }
+            String absolute = audioStorageUtil.saveAudio(audio, sessionId, "interviewer");
+            return audioStorageUtil.toPlayablePath(absolute);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * 合成并保存面试官语音：调用 TTS 生成音频，存入会话录音目录并返回可回放相对路径。
      * TTS 失败（密钥未配置/超长/服务异常）时返回 null，不阻断面试流程。
@@ -210,10 +389,9 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         if (text == null || text.isBlank()) {
             return null;
         }
-        // 腾讯 TTS 单次约 150 字上限，超长截断
-        String ttsText = text.length() > 150 ? text.substring(0, 150) : text;
         try {
-            byte[] audio = voiceService.synthesizeSpeech(ttsText, persona == null ? null : persona.getStyleConfig());
+            // 按句切分逐句合成后拼接，支持完整长回复（不再截断 150 字）
+            byte[] audio = voiceService.synthesizeSpeechLong(text, persona == null ? null : persona.getStyleConfig());
             if (audio == null || audio.length == 0) {
                 return null;
             }
@@ -407,6 +585,9 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 4. 每一轮只提出一个问题或一段追问，不要一次抛出多个问题；
                 5. 始终保持本面试官的风格（用词、语气、追问策略），不要偏离身份；
                 6. 若发现当前面试官风格不再适合候选人（例如候选人过度紧张、需要更温和的引导；或回答过浅、需要更严厉的深挖），可以在回复末尾附加一行“【建议换面试官:ID】”，ID 必须来自【可切换的面试官风格】列表且不等于当前面试官；一般情况下不要建议，也不要连续多轮建议；该标记不会展示给候选人。
+
+                7. 全程不得输出任何代码示例、代码块、伪代码或具体 API/语法签名；涉及技术概念时只做口头讲解与原理阐述，因为你的回复会经语音播报，代码无法朗读且严重影响体验。
+                8. 不要在回复中输出任何括号内的语气/动作/神态说明（如“（语气冷淡）”“（稍缓）”“（停顿）”），也不要输出旁白或舞台指示；你的语气由面试官风格自动体现，直接输出要说的话即可。
 
                 现在，请结合以上信息与对话历史，继续本次面试。
                 """.formatted(

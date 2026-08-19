@@ -36,6 +36,12 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
+		<!-- WebSocket 支持：实时语音流式对话（流式 ASR + 流式 TTS） -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-websocket</artifactId>
+		</dependency>
+
 		<!-- MyBatis-Plus（Spring Boot 4 专用 starter） -->
 		<dependency>
 			<groupId>com.baomidou</groupId>

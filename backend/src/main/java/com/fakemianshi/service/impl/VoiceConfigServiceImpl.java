@@ -28,20 +28,19 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
     @Override
     @Transactional
     public VoiceConfig saveConfig(VoiceConfigDTO dto) {
-        // 停用旧配置
-        voiceConfigRepository.findByIsActiveTrue().ifPresent(old -> {
+        // 停用旧配置，并保留其密钥用于「留空保留原值」
+        VoiceConfig old = voiceConfigRepository.findByIsActiveTrue().orElse(null);
+        if (old != null) {
             old.setIsActive(false);
             old.setUpdatedAt(LocalDateTime.now());
             voiceConfigRepository.updateById(old);
-        });
+        }
 
         VoiceConfig cfg = new VoiceConfig();
         cfg.setProvider(PROVIDER_TENCENT);
-        // 密钥留空表示保留原值
-        cfg.setSecretId(dto.getSecretId() == null || dto.getSecretId().isBlank()
-                ? null : dto.getSecretId().trim());
-        cfg.setSecretKey(dto.getSecretKey() == null || dto.getSecretKey().isBlank()
-                ? null : dto.getSecretKey().trim());
+        // 密钥留空或为脱敏值（含 *）时保留原值：避免页面回显的脱敏 SecretId 被误存、SecretKey 被清空
+        cfg.setSecretId(resolveSecret(dto.getSecretId(), old == null ? null : old.getSecretId()));
+        cfg.setSecretKey(resolveSecret(dto.getSecretKey(), old == null ? null : old.getSecretKey()));
         cfg.setAppId(dto.getAppId() == null ? null : dto.getAppId().trim());
         cfg.setRegion(dto.getRegion() == null || dto.getRegion().isBlank()
                 ? "ap-guangzhou" : dto.getRegion().trim());
@@ -53,6 +52,14 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
         cfg.setUpdatedAt(LocalDateTime.now());
         voiceConfigRepository.insert(cfg);
         return cfg;
+    }
+
+    /** 入参为空或为脱敏值（含 *）时返回原值，否则返回 trim 后的入参。 */
+    private String resolveSecret(String input, String original) {
+        if (input == null || input.isBlank() || input.contains("*")) {
+            return original;
+        }
+        return input.trim();
     }
 
     @Override

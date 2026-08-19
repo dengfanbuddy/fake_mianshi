@@ -10,6 +10,7 @@ import com.fakemianshi.entity.MockInterviewMessage;
 import com.fakemianshi.service.MockInterviewService;
 import com.fakemianshi.util.AudioStorageUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,9 +20,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.databind.ObjectMapper;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 模拟面试接口。
@@ -32,6 +37,8 @@ import java.util.List;
 @RequestMapping("/mock-interview")
 @RequiredArgsConstructor
 public class MockInterviewController {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final MockInterviewService mockInterviewService;
     private final AudioStorageUtil audioStorageUtil;
@@ -48,6 +55,46 @@ public class MockInterviewController {
     public ApiResponse<MockInterviewRespondResponse> respond(@PathVariable Long sessionId,
                                                              @RequestBody(required = false) MockInterviewRespondRequest req) {
         return ApiResponse.success(mockInterviewService.respond(sessionId, req));
+    }
+
+    /**
+     * 流式回复：SSE 打字机推送面试官回复文本增量，结束时推送最终保存结果。
+     * 事件：delta（文本增量）/ reasoning（思考增量）/ done（最终结果）/ error（错误信息）。
+     */
+    @PostMapping(value = "/respond-stream/{sessionId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public void respondStream(@PathVariable Long sessionId,
+                              @RequestBody(required = false) MockInterviewRespondRequest req,
+                              HttpServletResponse response) throws IOException {
+        response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);
+        response.setCharacterEncoding("UTF-8");
+        PrintWriter writer = response.getWriter();
+
+        try {
+            MockInterviewRespondResponse result = mockInterviewService.respondStreaming(
+                    sessionId,
+                    req,
+                    delta -> writeSseJson(writer, "delta", Map.of("text", delta == null ? "" : delta)),
+                    reasoning -> writeSseJson(writer, "reasoning", Map.of("text", reasoning == null ? "" : reasoning)));
+            writeSseJson(writer, "done", result);
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? "unknown" : e.getMessage();
+            writeSseJson(writer, "error", Map.of("message", msg));
+        } finally {
+            writer.close();
+        }
+    }
+
+    /** 写入一条 SSE 事件（event + data + 空行），data 对象序列化为 JSON。 */
+    private void writeSseJson(PrintWriter writer, String event, Object data) {
+        String json;
+        try {
+            json = OBJECT_MAPPER.writeValueAsString(data);
+        } catch (tools.jackson.core.JacksonException e) {
+            json = "{}";
+        }
+        writer.write("event: " + event + "\n");
+        writer.write("data: " + json + "\n\n");
+        writer.flush();
     }
 
     /** 主动收尾面试：生成总结并将会话置为 COMPLETED */

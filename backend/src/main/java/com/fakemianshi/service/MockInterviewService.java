@@ -24,6 +24,23 @@ public interface MockInterviewService {
     MockInterviewRespondResponse respond(Long sessionId, MockInterviewRespondRequest req);
 
     /**
+     * 流式版 {@link #respond}：边生成边回调文本增量，供 SSE 打字机效果；返回最终保存的双方消息。
+     *
+     * @param onDelta     面试官回复文本增量回调（可为 null）
+     * @param onReasoning 思考过程增量回调（可为 null）
+     */
+    MockInterviewRespondResponse respondStreaming(Long sessionId, MockInterviewRespondRequest req,
+                                                  java.util.function.Consumer<String> onDelta,
+                                                  java.util.function.Consumer<String> onReasoning);
+
+    /**
+     * 全链路流式面试回复（Phase B）：识别文本 → 流式 LLM → 按句流式 TTS，
+     * 文本增量经 {@code sink.onTextDelta}、语音 PCM 分片经 {@code sink.onAudio} 推送给前端，
+     * 结束后经 {@code sink.onDone} 返回已保存的双方消息。出错经 {@code sink.onError} 通知前端降级。
+     */
+    void streamInterviewReply(Long sessionId, MockInterviewRespondRequest req, StreamEventSink sink);
+
+    /**
      * 主动收尾面试：生成总结评价并宣布面试结束，将会话置为 COMPLETED。
      */
     MockInterviewMessage concludeInterview(Long sessionId);

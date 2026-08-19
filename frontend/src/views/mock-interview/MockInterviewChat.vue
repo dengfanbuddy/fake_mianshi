@@ -6,6 +6,7 @@ import AudioRecorder from '../../components/AudioRecorder.vue'
 import {
   startMockInterview,
   respondMockInterview,
+  respondMockInterviewStream,
   concludeMockInterview,
   getMockInterviewMessages,
   switchPersona,
@@ -13,6 +14,8 @@ import {
 } from '../../api/mock-interview'
 import { recognizeSpeech, synthesizeSpeech, uploadAudio } from '../../api/voice'
 import { blobToWav } from '../../utils/audio'
+import { createVoiceStream } from '../../utils/voiceStream'
+import { PcmQueuePlayer } from '../../utils/audioQueue'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,7 +35,7 @@ const sending = ref(false) // 回复发送中
 const recognizing = ref(false) // STT 识别中
 const ending = ref(false) // 结束面试
 const switching = ref(false) // 换面试官
-const thinking = computed(() => sending.value) // 面试官思考中
+const thinking = computed(() => sending.value && !streamingInProgress.value) // 面试官思考中
 
 // ---------- 配置状态 ----------
 const personas = ref([])
@@ -46,6 +49,16 @@ const switchDialogVisible = ref(false)
 const switchPersonaId = ref(null)
 
 const listRef = ref(null)
+
+// ---------- 流式语音状态 ----------
+const wsReady = ref(false) // WebSocket 流式识别已就绪
+const partialText = ref('') // 流式 ASR 中间识别文本
+const streamingWsBubble = ref(null) // WebSocket 流式回复中的面试官气泡
+const streamingCandidate = ref(null) // WebSocket 流式路径下乐观插入的候选人消息
+const streamingInProgress = ref(false) // 是否有流式回复气泡正在增长
+const wsBufferedChunks = [] // WS 就绪前缓存的 PCM 分片
+let voiceStream = null // WebSocket 流式控制器
+let pcmPlayer = null // 面试官语音 PCM 播放队列
 
 // ---------- 派生数据 ----------
 const currentPersonaId = computed(() => {
@@ -193,7 +206,7 @@ function sendText() {
   }
   if (sending.value || recognizing.value) return
   textInput.value = ''
-  doSend(text)
+  doSendStreaming(text)
 }
 
 // 语音录音结束 → STT → 保存录音 → respond
@@ -218,7 +231,7 @@ async function handleRecorded(blob) {
     } catch (e) {
       ElMessage.warning('录音保存失败，本次回答将无语音回放')
     }
-    doSend(text, audioPath)
+    doSendStreaming(text, audioPath)
   } catch (e) {
     recognizing.value = false
     ElMessage.error(`语音识别失败：${e.message || '未知错误'}，请改用文字输入`)
@@ -273,6 +286,217 @@ async function doSend(text, audioPath = null) {
   } finally {
     sending.value = false
   }
+}
+
+// ---------- 流式回复（Phase A：SSE 打字机 + 完整语音） ----------
+function beginStreamingReply() {
+  streamingInProgress.value = true
+  messages.value.push({
+    id: null,
+    role: 'INTERVIEWER',
+    content: '',
+    personaId: currentPersonaId.value,
+    createdAt: new Date(),
+    streaming: true,
+  })
+  return messages.value[messages.value.length - 1]
+}
+
+function finalizeSseReply(streamingBubble, data) {
+  streamingInProgress.value = false
+  const sidx = messages.value.indexOf(streamingBubble)
+  if (sidx >= 0 && data?.aiMessage) messages.value[sidx] = data.aiMessage
+  else if (sidx >= 0) messages.value.splice(sidx, 1)
+  const aiContent = data?.aiMessage?.content || ''
+  if (aiContent.startsWith('【面试结束】')) {
+    ended.value = true
+    handleInterviewEnded()
+  } else if (autoTts.value) {
+    if (data?.aiMessage?.audioPath) playReplay(data.aiMessage.audioPath)
+    else speak(aiContent)
+  }
+  handleSwitchSuggestion(data?.suggestedPersonaId)
+}
+
+async function doSendStreaming(text, audioPath = null) {
+  if (!sessionId.value || sending.value) return
+  const optimistic = {
+    id: null,
+    role: 'CANDIDATE',
+    content: text,
+    audioPath,
+    createdAt: new Date(),
+  }
+  messages.value.push(optimistic)
+  sending.value = true
+  const streamingBubble = beginStreamingReply()
+  let finalized = false
+
+  try {
+    await respondMockInterviewStream(sessionId.value, { userText: text, audioPath }, ({ event, data }) => {
+      if (event === 'delta') {
+        streamingBubble.content += data.text || ''
+        scrollToBottom()
+      } else if (event === 'done') {
+        finalized = true
+        const idx = messages.value.indexOf(optimistic)
+        if (idx >= 0) messages.value[idx] = data.userMessage || optimistic
+        else messages.value.push(data.userMessage)
+        finalizeSseReply(streamingBubble, data)
+      } else if (event === 'error') {
+        throw new Error(data?.message || '流式回复失败')
+      }
+    })
+    if (!finalized) throw new Error('流式回复中断')
+  } catch (e) {
+    if (finalized) {
+      ElMessage.error(`回复处理出错：${e.message || '未知错误'}`)
+    } else {
+      // 回退到非流式
+      messages.value = messages.value.filter((m) => m !== optimistic && m !== streamingBubble)
+      textInput.value = text
+      ElMessage.warning('流式回复不可用，已切换到普通模式')
+      await doSend(text, audioPath)
+    }
+  } finally {
+    sending.value = false
+  }
+}
+
+// ---------- 全链路流式语音（Phase B：WebSocket） ----------
+function ensurePcmPlayer() {
+  if (!pcmPlayer) pcmPlayer = new PcmQueuePlayer()
+  return pcmPlayer
+}
+
+function onRecStart() {
+  wsReady.value = false
+  partialText.value = ''
+  streamingWsBubble.value = null
+  streamingCandidate.value = null
+  wsBufferedChunks.length = 0
+  const player = ensurePcmPlayer()
+  player.stop()
+  player.prime() // 在用户手势中解锁 AudioContext，避免自动播放被拦截
+  // 上一轮流式连接若未关闭，先关闭（每轮使用新连接）
+  if (voiceStream) {
+    voiceStream.close()
+    voiceStream = null
+  }
+  if (!sessionId.value || ended.value) return
+
+  const stream = createVoiceStream({
+    sessionId: sessionId.value,
+    onReady: () => {
+      wsReady.value = true
+      for (const c of wsBufferedChunks) stream.push(c)
+      wsBufferedChunks.length = 0
+    },
+    onPartial: (txt) => {
+      partialText.value = txt
+    },
+    onUserText: (data) => {
+      // 识别文本就绪即显示候选人消息（不等待 LLM 回复），并清除中间识别提示
+      partialText.value = ''
+      messages.value.push({
+        id: null,
+        role: 'CANDIDATE',
+        content: data?.text || '',
+        audioPath: data?.audioPath || null,
+        createdAt: new Date(),
+      })
+      streamingCandidate.value = messages.value[messages.value.length - 1]
+      scrollToBottom()
+    },
+    onText: (delta) => {
+      if (!streamingWsBubble.value) streamingWsBubble.value = beginStreamingReply()
+      streamingWsBubble.value.content += delta || ''
+      scrollToBottom()
+    },
+    onAudio: (int16) => {
+      if (autoTts.value) ensurePcmPlayer().enqueue(int16)
+    },
+    onDone: (data) => {
+      sending.value = false
+      finalizeWsReply(data)
+    },
+    onError: (msg) => {
+      sending.value = false
+      partialText.value = ''
+      ElMessage.error(msg || '流式语音出错')
+    },
+    onSttEmpty: () => {
+      sending.value = false
+      partialText.value = ''
+      ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
+    },
+  })
+  voiceStream = stream
+  stream.connect().catch(() => {
+    // WS 建立失败：保持 wsReady=false，回退 HTTP 路径
+    voiceStream = null
+  })
+}
+
+function onRecChunk(int16) {
+  if (wsReady.value && voiceStream) {
+    voiceStream.push(int16)
+  } else {
+    wsBufferedChunks.push(int16)
+  }
+}
+
+async function onRecRecorded(blob) {
+  if (wsReady.value && voiceStream) {
+    // 流式模式：松开发送，后续由 WS 事件驱动
+    sending.value = true
+    voiceStream.end()
+    return
+  }
+  // 未就绪：回退 HTTP 路径（STT + 流式回复）
+  const stream = voiceStream
+  voiceStream = null
+  if (stream) stream.close()
+  await handleRecorded(blob)
+}
+
+function finalizeWsReply(data) {
+  streamingInProgress.value = false
+  const bubble = streamingWsBubble.value
+  streamingWsBubble.value = null
+  const aiMessage = data?.aiMessage || {
+    id: null,
+    role: 'INTERVIEWER',
+    content: bubble?.content || '',
+    personaId: currentPersonaId.value,
+    createdAt: new Date(),
+  }
+
+  // 候选人消息：替换 onUserText 时乐观插入的那条
+  const cand = streamingCandidate.value
+  streamingCandidate.value = null
+  if (cand && data?.userMessage) {
+    const cidx = messages.value.indexOf(cand)
+    if (cidx >= 0) messages.value[cidx] = data.userMessage
+  } else if (data?.userMessage) {
+    messages.value.push(data.userMessage)
+  }
+
+  // 面试官消息：替换流式气泡或追加
+  if (bubble) {
+    const sidx = messages.value.indexOf(bubble)
+    if (sidx >= 0) messages.value.splice(sidx, 1, aiMessage)
+    else messages.value.push(aiMessage)
+  } else {
+    messages.value.push(aiMessage)
+  }
+
+  const aiContent = aiMessage.content || ''
+  if (aiContent.startsWith('【面试结束】')) {
+    ended.value = true
+    handleInterviewEnded()
+  }
+  handleSwitchSuggestion(data?.suggestedPersonaId)
 }
 
 // ---------- 结束判定 ----------
@@ -652,6 +876,16 @@ watch(
               </span>
             </div>
           </div>
+
+          <!-- 实时识别中（用户说话内容的中间结果，固定在消息区展示，避免撑动输入区高度） -->
+          <div v-if="recognizing || partialText" class="msg-row msg-candidate">
+            <div class="bubble-group">
+              <div class="bubble bubble-candidate recognizing-bubble">
+                <span class="recognizing-dot" />
+                <span class="recognizing-text">{{ partialText || '正在识别…' }}</span>
+              </div>
+            </div>
+          </div>
         </template>
       </div>
 
@@ -661,7 +895,9 @@ watch(
         <div class="input-row">
           <AudioRecorder
             :class="{ 'input-disabled': sending || recognizing || ended }"
-            @recorded="handleRecorded"
+            @start="onRecStart"
+            @chunk="onRecChunk"
+            @recorded="onRecRecorded"
           />
           <el-input
             v-model="textInput"
@@ -682,7 +918,6 @@ watch(
             发送
           </el-button>
         </div>
-        <div v-if="recognizing" class="status-line status-recognizing">识别中…</div>
         <div class="tool-row">
           <el-switch
             v-model="autoTts"
@@ -1020,11 +1255,36 @@ watch(
   opacity: 0.5;
   pointer-events: none;
 }
-.status-line {
-  font-size: 12px;
-  color: #e6a23c;
-  margin-top: 4px;
-  text-align: center;
+.recognizing-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.9;
+}
+.recognizing-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #409eff;
+  animation: recognizing-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.recognizing-text {
+  font-size: 13px;
+  color: #606266;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55vw;
+}
+@keyframes recognizing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .tool-row {
   margin-top: 8px;

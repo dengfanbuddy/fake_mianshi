@@ -42,6 +42,14 @@ public interface LlmService {
                       java.util.function.Consumer<String> onReasoning);
 
     /**
+     * 流式对话（完整消息列表版）：与 {@link #chatStream(String, String, int, java.util.function.Consumer, java.util.function.Consumer)}
+     * 相同，但可自由控制 role（system / user / assistant），用于携带完整对话历史的模拟面试。
+     */
+    String chatStream(List<Message> messages, int maxTokens,
+                      java.util.function.Consumer<String> onDelta,
+                      java.util.function.Consumer<String> onReasoning);
+
+    /**
      * 对话消息。
      */
     record Message(String role, String content) {}

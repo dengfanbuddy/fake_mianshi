@@ -80,3 +80,56 @@ function writeString(view, offset, str) {
     view.setUint8(offset + i, str.charCodeAt(i))
   }
 }
+
+/**
+ * 文本分句：按句末标点切分，单句超过 maxLen 硬切（供前端逐句 TTS 播报）。
+ * @param {string} text
+ * @param {number} maxLen
+ * @returns {string[]}
+ */
+export function splitSentences(text, maxLen = 150) {
+  const result = []
+  if (!text) return result
+  let buf = ''
+  for (const ch of text) {
+    buf += ch
+    const isEnd = '。！？；!?;\n'.includes(ch)
+    if (isEnd || buf.length >= maxLen) {
+      const seg = buf.trim()
+      if (seg) result.push(seg)
+      buf = ''
+    }
+  }
+  const last = buf.trim()
+  if (last) result.push(last)
+  return result
+}
+
+/**
+ * 把 Int16 PCM（16k 单声道）封装为 WAV Blob。
+ * @param {Int16Array|number[]} samples
+ * @param {number} sampleRate
+ * @returns {Blob}
+ */
+export function pcmToWavBlob(samples, sampleRate = 16000) {
+  const int16 = samples instanceof Int16Array ? samples : new Int16Array(samples)
+  const buffer = new ArrayBuffer(44 + int16.length * 2)
+  const view = new DataView(buffer)
+  writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + int16.length * 2, true)
+  writeString(view, 8, 'WAVE')
+  writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true) // PCM
+  view.setUint16(22, 1, true) // mono
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * 2, true) // byte rate
+  view.setUint16(32, 2, true) // block align
+  view.setUint16(34, 16, true) // bits per sample
+  writeString(view, 36, 'data')
+  view.setUint32(40, int16.length * 2, true)
+  for (let i = 0; i < int16.length; i++) {
+    view.setInt16(44 + i * 2, int16[i], true)
+  }
+  return new Blob([buffer], { type: 'audio/wav' })
+}

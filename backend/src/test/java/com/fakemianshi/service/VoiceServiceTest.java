@@ -84,26 +84,37 @@ class VoiceServiceTest {
     }
 
     @Test
-    void mapVoiceType_shouldMapSeriousTo1004AndSternTo1010() {
+    void mapVoiceType_shouldMapByTone() {
         VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("1004", service.mapVoiceType("{\"tone\":\"serious\"}"));
+        assertEquals("1018", service.mapVoiceType("{\"tone\":\"serious\"}"));
         assertEquals("1010", service.mapVoiceType("{\"tone\":\"stern\"}"));
-    }
-
-    @Test
-    void mapVoiceType_shouldMapWarmTo1002() {
-        VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("1002", service.mapVoiceType("{\"tone\":\"warm\"}"));
-    }
-
-    @Test
-    void mapVoiceType_shouldDefaultTo1004() {
-        VoiceServiceImpl service = new VoiceServiceImpl(configured());
-        assertEquals("1004", service.mapVoiceType("{\"tone\":\"neutral\"}"));
+        assertEquals("1001", service.mapVoiceType("{\"tone\":\"warm\"}"));
         assertEquals("1004", service.mapVoiceType("{\"tone\":\"professional\"}"));
+        assertEquals("1009", service.mapVoiceType("{\"tone\":\"neutral\"}"));
+    }
+
+    @Test
+    void mapVoiceType_shouldPreferExplicitVoiceType() {
+        VoiceServiceImpl service = new VoiceServiceImpl(configured());
+        assertEquals("1002", service.mapVoiceType("{\"tone\":\"serious\",\"voiceType\":\"1002\"}"));
+    }
+
+    @Test
+    void mapVoiceType_shouldFallbackToDefault() {
+        VoiceServiceImpl service = new VoiceServiceImpl(configured());
         assertEquals("1004", service.mapVoiceType("not valid json"));
         assertEquals("1004", service.mapVoiceType(""));
         assertEquals("1004", service.mapVoiceType(null));
+    }
+
+    @Test
+    void mapSpeed_shouldMapBySpeed() {
+        VoiceServiceImpl service = new VoiceServiceImpl(configured());
+        assertEquals(-1, service.mapSpeed("{\"speed\":\"slow\"}"));
+        assertEquals(0, service.mapSpeed("{\"speed\":\"medium\"}"));
+        assertEquals(1, service.mapSpeed("{\"speed\":\"fast\"}"));
+        assertEquals(0, service.mapSpeed("not valid json"));
+        assertEquals(0, service.mapSpeed(null));
     }
 
     @Test

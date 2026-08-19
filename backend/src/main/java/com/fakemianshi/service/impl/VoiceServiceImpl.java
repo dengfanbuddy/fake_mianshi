@@ -10,6 +10,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
+import com.fakemianshi.util.SentenceSplitter;
+import com.fakemianshi.util.WavAudio;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
@@ -24,9 +27,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * 语音服务默认实现：通过 REST API 直连腾讯云（ASR 一句话识别 + TTS 基础语音合成）。
@@ -127,7 +133,7 @@ public class VoiceServiceImpl implements VoiceService {
             root.put("ModelType", 1);
             root.put("VoiceType", Integer.parseInt(mapVoiceType(voiceType)));
             root.put("Codec", "wav");
-            root.put("Speed", 0);
+            root.put("Speed", mapSpeed(voiceType));
             root.put("Volume", 0);
             String payload = OBJECT_MAPPER.writeValueAsString(root);
 
@@ -152,11 +158,58 @@ public class VoiceServiceImpl implements VoiceService {
         }
     }
 
+    @Override
+    public byte[] synthesizeSpeechLong(String text, String voiceType) {
+        if (text == null || text.isBlank()) {
+            return new byte[0];
+        }
+        List<String> sentences = SentenceSplitter.split(text);
+        if (sentences.isEmpty()) {
+            return new byte[0];
+        }
+        List<byte[]> wavs = new ArrayList<>(sentences.size());
+        for (String sentence : sentences) {
+            byte[] wav = synthesizeSpeech(sentence, voiceType);
+            if (wav != null && wav.length > 0) {
+                wavs.add(wav);
+            }
+        }
+        return WavAudio.concat(wavs);
+    }
+
+    @Override
+    public void synthesizeSpeechStream(String text, String voiceType, Consumer<byte[]> onPcmChunk) {
+        validateConfigured();
+        if (text == null || text.isBlank() || onPcmChunk == null) {
+            return;
+        }
+        try {
+            ObjectNode root = OBJECT_MAPPER.createObjectNode();
+            root.put("Text", text);
+            root.put("SessionId", UUID.randomUUID().toString());
+            root.put("ModelType", 1);
+            root.put("VoiceType", Integer.parseInt(mapVoiceType(voiceType)));
+            root.put("Codec", "pcm");
+            root.put("Speed", mapSpeed(voiceType));
+            root.put("Volume", 0);
+            String payload = OBJECT_MAPPER.writeValueAsString(root);
+
+            com.fakemianshi.entity.VoiceConfig cfg = resolveVoiceConfig();
+            String ttsUrl = cfg != null ? cfg.getTtsUrl() : properties.getTtsUrl();
+            doPostStreaming(ttsUrl, TTS_SERVICE, "TextToStreamAudio", TTS_VERSION, payload, onPcmChunk);
+        } catch (JacksonException e) {
+            throw new BusinessException("语音合成请求构建失败: " + e.getMessage(), e);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException("语音合成参数错误: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * 根据面试官风格配置（JSON）映射腾讯云 TTS 音色编号（新版 2019-08-23 音色 ID）。
      *
-     * <p>从 styleConfig 中解析 tone 字段：serious → 1004（智云·男声）、
-     * stern → 1010（智华·成熟男声）、warm → 1002（智聆·亲切女声）、
+     * <p>从 styleConfig 中解析 tone 字段映射腾讯云音色：
+     * serious → 1010（智华·成熟男声，技术深挖）、stern → 1004（智云·男声，压力面试）、
+     * warm → 1002（智聆·亲切女声，温和引导）、professional → 1010（智华·成熟男声，项目实战）、
      * neutral/未知 → 1004（智云·标准男声）。
      *
      * @param personaStyleConfig 人设风格配置 JSON 字符串
@@ -168,16 +221,42 @@ public class VoiceServiceImpl implements VoiceService {
         }
         try {
             JsonNode node = OBJECT_MAPPER.readTree(personaStyleConfig);
+            // 人设 styleConfig 里显式指定 voiceType 时优先使用（便于按人设精调音色）
+            String explicit = node.path("voiceType").asText("").trim();
+            if (!explicit.isEmpty()) {
+                return explicit;
+            }
             String tone = node.path("tone").asText("").trim().toLowerCase();
             return switch (tone) {
-                case "serious" -> "1004";
-                case "stern" -> "1010";
-                case "warm" -> "1002";
-                case "neutral" -> DEFAULT_VOICE_TYPE;
+                case "serious" -> "1018";       // 智靖·情感男声（严肃深挖，有感情）
+                case "stern" -> "1010";         // 智华·通用男声（严厉施压）
+                case "warm" -> "1001";          // 智瑜·情感女声（温和引导，亲切）
+                case "professional" -> "1004";  // 智云·通用男声（项目实战，专业）
+                case "neutral" -> "1009";       // 智芸·知性女声（八股文标准考察）
                 default -> DEFAULT_VOICE_TYPE;
             };
         } catch (JacksonException e) {
             return DEFAULT_VOICE_TYPE;
+        }
+    }
+
+    /**
+     * 从人设 styleConfig 中解析语速（slow/medium/fast），映射为腾讯云 TTS Speed（-2~2）。
+     */
+    public int mapSpeed(String personaStyleConfig) {
+        if (personaStyleConfig == null || personaStyleConfig.isBlank()) {
+            return 0;
+        }
+        try {
+            JsonNode node = OBJECT_MAPPER.readTree(personaStyleConfig);
+            String speed = node.path("speed").asText("").trim().toLowerCase();
+            return switch (speed) {
+                case "slow" -> -1;
+                case "fast" -> 1;
+                default -> 0;
+            };
+        } catch (JacksonException e) {
+            return 0;
         }
     }
 
@@ -239,9 +318,9 @@ public class VoiceServiceImpl implements VoiceService {
     }
 
     /**
-     * 发起签名后的 POST 请求，返回响应体字符串；非 2xx 状态码时抛出业务异常。
+     * 构建带 TC3 签名的 POST 请求（公共参数经 X-TC-* 请求头传递，不入 body）。
      */
-    private String doPost(String url, String service, String action, String version, String payload) {
+    private HttpRequest buildSignedRequest(String url, String service, String action, String version, String payload) {
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
         String host = URI.create(url).getHost();
         com.fakemianshi.entity.VoiceConfig cfg = resolveVoiceConfig();
@@ -251,17 +330,24 @@ public class VoiceServiceImpl implements VoiceService {
         String authorization = tc3Sign(secretId, secretKey,
                 service, host, action, version, timestamp, payload, region);
 
-        HttpRequest request = HttpRequest.newBuilder()
+        return HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json; charset=utf-8")
                 .header("X-TC-Action", action)
                 .header("X-TC-Version", version)
                 .header("X-TC-Timestamp", timestamp)
-                .header("X-TC-Region", cfg != null ? cfg.getRegion() : properties.getRegion())
+                .header("X-TC-Region", region)
                 .header("Authorization", authorization)
                 .timeout(Duration.ofSeconds(60))
                 .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
                 .build();
+    }
+
+    /**
+     * 发起签名后的 POST 请求，返回响应体字符串；非 2xx 状态码时抛出业务异常。
+     */
+    private String doPost(String url, String service, String action, String version, String payload) {
+        HttpRequest request = buildSignedRequest(url, service, action, version, payload);
 
         HttpResponse<String> response;
         try {
@@ -278,6 +364,54 @@ public class VoiceServiceImpl implements VoiceService {
             throw new BusinessException("腾讯云语音服务调用失败，状态码: " + statusCode + "，响应: " + response.body());
         }
         return response.body();
+    }
+
+    /**
+     * 发起签名后的流式 POST 请求（实时语音合成 TextToStreamAudio），
+     * 边读响应边回调 PCM 分片；非 2xx 状态码时读取错误体并抛出业务异常。
+     */
+    private void doPostStreaming(String url, String service, String action, String version, String payload,
+                                 Consumer<byte[]> onPcmChunk) {
+        HttpRequest request = buildSignedRequest(url, service, action, version, payload);
+
+        HttpResponse<java.io.InputStream> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new BusinessException("腾讯云语音服务调用失败: " + e.getMessage(), e);
+        }
+
+        int statusCode = response.statusCode();
+        if (statusCode < 200 || statusCode >= 300) {
+            String errBody = readBody(response.body());
+            throw new BusinessException("腾讯云语音服务调用失败，状态码: " + statusCode + "，响应: " + errBody);
+        }
+
+        try (java.io.InputStream in = response.body()) {
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                if (n > 0) {
+                    byte[] chunk = new byte[n];
+                    System.arraycopy(buf, 0, chunk, 0, n);
+                    onPcmChunk.accept(chunk);
+                }
+            }
+        } catch (IOException e) {
+            throw new BusinessException("流式语音合成响应读取失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 读取错误响应体为字符串，读取失败返回空串 */
+    private String readBody(java.io.InputStream in) {
+        try {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return "";
+        }
     }
 
     /** SHA-256 摘要，返回小写十六进制 */

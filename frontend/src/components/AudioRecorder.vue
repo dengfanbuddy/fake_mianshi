@@ -1,34 +1,32 @@
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
+import { PcmRecorder } from '../utils/pcmRecorder'
 
 /**
- * 按住说话录音组件。
+ * 按住说话录音组件（16k PCM 直采）。
  * - pointerdown 开始录音，pointerup / pointerleave 结束（贴近真实对讲）
- * - MediaRecorder 录制，mimeType 优先 audio/webm（浏览器通用），自动降级
- * - 最长 120 秒自动停止
- * - 停止后清理 stream tracks
+ * - 录音过程中持续 emit('chunk', Int16Array) 供流式 ASR
+ * - 结束后 emit('recorded', wavBlob) 供回退 HTTP 路径
  */
-const emit = defineEmits(['recorded', 'error', 'start', 'stop'])
+const emit = defineEmits(['recorded', 'error', 'start', 'stop', 'chunk'])
 
 const MAX_DURATION = 120 // 秒
 
 const state = ref('idle') // idle | recording
 const seconds = ref(0)
 
-let mediaRecorder = null
-let stream = null
-let chunks = []
+let recorder = null
 let timer = null
 let startTime = 0
 let unmounted = false
-let pending = false // getUserMedia 进行中
-let stopRequested = false // 录音未真正开始前用户已松开
+let pending = false
+let stopRequested = false
 
 const isSupported =
   typeof navigator !== 'undefined' &&
   !!navigator.mediaDevices?.getUserMedia &&
-  typeof MediaRecorder !== 'undefined'
+  !!(window.AudioContext || window.webkitAudioContext)
 
 const isRecording = computed(() => state.value === 'recording')
 
@@ -40,15 +38,6 @@ const displayTime = computed(() => {
   return `${m}:${s}`
 })
 
-// 浏览器支持的录制格式，优先 webm
-function pickMimeType() {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/mpeg']
-  for (const t of candidates) {
-    if (MediaRecorder.isTypeSupported(t)) return t
-  }
-  return ''
-}
-
 async function startRecording() {
   if (state.value === 'recording' || pending) return
   if (!isSupported) {
@@ -58,34 +47,24 @@ async function startRecording() {
   }
   pending = true
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    recorder = new PcmRecorder({
+      onChunk: (int16) => {
+        emit('chunk', int16)
+      },
+      onError: (e) => {
+        ElMessage.warning(`录音出错：${e?.message || '未知错误'}`)
+        emit('error', 'recorder-error')
+      },
+    })
+    await recorder.start()
     pending = false
     // 用户在权限请求期间已松开按钮，直接放弃本次录音
     if (unmounted || stopRequested) {
       stopRequested = false
-      cleanup()
+      recorder.stop()
+      recorder = null
       return
     }
-    chunks = []
-    const mimeType = pickMimeType()
-    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data)
-    }
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || mimeType || 'audio/webm' })
-      cleanup()
-      if (unmounted) return // 组件卸载时不向外 emit
-      emit('recorded', blob)
-    }
-    mediaRecorder.onerror = () => {
-      cleanup()
-      ElMessage.error('录音失败，请重试或改用文字输入')
-      emit('error', 'recorder-error')
-    }
-
-    mediaRecorder.start()
     state.value = 'recording'
     startTime = Date.now()
     seconds.value = 0
@@ -105,7 +84,10 @@ async function startRecording() {
     } else {
       ElMessage.warning(`无法访问麦克风：${e.message || '未知错误'}，请改用文字输入`)
     }
-    cleanup()
+    if (recorder) {
+      recorder.stop()
+      recorder = null
+    }
     emit('error', 'permission-denied')
   }
 }
@@ -120,16 +102,25 @@ function requestStop() {
 }
 
 function stopRecording() {
-  if (state.value !== 'recording' || !mediaRecorder) return
+  if (state.value !== 'recording' || !recorder) return
   if (timer) {
     clearInterval(timer)
     timer = null
   }
-  if (mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop() // 触发 onstop → emit('recorded')
-  }
   state.value = 'idle'
   emit('stop')
+  try {
+    const wavBlob = recorder.getWavBlob()
+    recorder.stop()
+    recorder = null
+    if (!unmounted && wavBlob && wavBlob.size > 44) {
+      emit('recorded', wavBlob)
+    }
+  } catch (e) {
+    recorder = null
+    ElMessage.error('录音结束处理失败，请重试或改用文字输入')
+    emit('error', 'recorder-error')
+  }
 }
 
 function cleanup() {
@@ -137,21 +128,15 @@ function cleanup() {
     clearInterval(timer)
     timer = null
   }
-  if (stream) {
-    stream.getTracks().forEach((t) => t.stop())
-    stream = null
+  if (recorder) {
+    recorder.stop()
+    recorder = null
   }
-  mediaRecorder = null
-  chunks = []
 }
 
 onBeforeUnmount(() => {
   unmounted = true
-  if (state.value === 'recording' && mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop()
-  } else {
-    cleanup()
-  }
+  cleanup()
 })
 </script>
 
