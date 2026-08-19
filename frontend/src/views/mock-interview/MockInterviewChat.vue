@@ -717,7 +717,7 @@ function scrollToBottom() {
   })
 }
 watch(
-  () => [messages.value.length, thinking.value, recognizing.value],
+  () => [messages.value.length, thinking.value, recognizing.value, partialText.value],
   () => scrollToBottom(),
   { flush: 'post' }
 )
