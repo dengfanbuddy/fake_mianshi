@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS session_analysis (
     character_traits        VARCHAR(3000),
     character_defects       VARCHAR(5000),
     communication_evaluation VARCHAR(5000),
+    humor_summary           VARCHAR(500),
     improvement_plan        VARCHAR(10000),
     created_at              TIMESTAMP NOT NULL
 );

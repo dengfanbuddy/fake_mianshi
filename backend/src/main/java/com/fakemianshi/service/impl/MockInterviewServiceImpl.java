@@ -113,7 +113,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final ConcurrentHashMap<Long, Boolean> referenceWrittenTestFlags = new ConcurrentHashMap<>();
 
     @Override
-    @Transactional
     public MockInterviewStartResponse start(Long projectId, MockInterviewStartRequest req) {
         // 1. 校验项目存在
         projectService.findById(projectId);
@@ -159,17 +158,19 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     @Override
-    @Transactional
     public MockInterviewRespondResponse respond(Long sessionId, MockInterviewRespondRequest req) {
         InterviewSession session = requireActiveSession(sessionId);
         requireUserText(req);
 
-        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
         String outline = getOutline(sessionId, session.getProjectId());
-        List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+        // 候选人消息先不落库，作为最后一条 user 消息拼进上下文；LLM 调用期间不持有 SQLite 写锁
+        List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
 
         LlmResponse llmResponse = llmService.chat(messages);
+
+        // LLM 成功后再插入候选人 + 面试官消息（成对写入，避免孤儿消息）
+        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
         return finalizeReply(sessionId, persona, userMessage,
                 llmResponse.getContent() == null ? "" : llmResponse.getContent());
     }
@@ -181,12 +182,12 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         InterviewSession session = requireActiveSession(sessionId);
         requireUserText(req);
 
-        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
         String outline = getOutline(sessionId, session.getProjectId());
-        List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+        List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
 
         String fullReply = llmService.chatStream(messages, LlmServiceImpl.DEFAULT_MAX_TOKENS, onDelta, onReasoning);
+        MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
         return finalizeReply(sessionId, persona, userMessage, fullReply == null ? "" : fullReply);
     }
 
@@ -196,10 +197,10 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             InterviewSession session = requireActiveSession(sessionId);
             requireUserText(req);
 
-            MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
             InterviewerPersona persona = resolveCurrentPersona(sessionId);
             String outline = getOutline(sessionId, session.getProjectId());
-            List<LlmService.Message> messages = buildMessages(session, persona, outline, null);
+            // 候选人消息先不落库，作为最后一条 user 消息拼进上下文；LLM/TTS 期间不持有 SQLite 写锁
+            List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
             String styleConfig = persona == null ? null : persona.getStyleConfig();
 
             // 累积流式合成出的 PCM，用于落盘回放，避免结束后再重复合成全文
@@ -253,6 +254,8 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                     ? WavAudio.pcmToWav(audioAccum.toByteArray(), WavAudio.SAMPLE_RATE, WavAudio.CHANNELS, WavAudio.BITS_PER_SAMPLE)
                     : new byte[0];
 
+            // LLM/TTS 成功后插入候选人消息（成对写入，避免孤儿消息）
+            MockInterviewMessage userMessage = saveCandidateMessage(sessionId, req);
             MockInterviewRespondResponse response = finalizeReply(sessionId, persona, userMessage,
                     fullReply == null ? "" : fullReply, fullAudio);
             wrappedSink.onDone(response);
@@ -440,7 +443,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     @Override
-    @Transactional
     public MockInterviewMessage concludeInterview(Long sessionId) {
         // 1. 校验会话存在且进行中
         InterviewSession session = requireActiveSession(sessionId);
@@ -468,8 +470,12 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         session.setCompletedAt(LocalDateTime.now());
         sessionRepository.updateById(session);
 
-        // 自动触发会话分析（在事务提交后执行，失败不阻断收尾）
-        triggerAnalysisAfterCommit(sessionId);
+        // 清理会话级内存缓存，避免无界增长
+        outlineCache.remove(sessionId);
+        referenceWrittenTestFlags.remove(sessionId);
+
+        // 自动触发会话分析（异步执行，不阻断收尾响应）
+        analysisService.triggerAnalyze(sessionId);
 
         return summaryMessage;
     }
@@ -682,7 +688,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         for (WeaknessTag tag : tags) {
             sb.append("- ")
                     .append(tag.getKnowledgePoint() == null ? "-" : tag.getKnowledgePoint())
-                    .append("（掌握程度：")
+                    .append("（薄弱程度：")
                     .append(tag.getMasteryLevel() == null ? "-" : tag.getMasteryLevel())
                     .append("）\n");
         }
@@ -698,8 +704,8 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                 .findByProjectIdAndTypeAndStatusOrderByCompletedAtDesc(
                         session.getProjectId(), TYPE_WRITTEN, STATUS_COMPLETED);
 
-        boolean include = Boolean.TRUE.equals(referenceWrittenTestFlags.get(session.getId()))
-                || !writtenSessions.isEmpty();
+        // 仅当用户勾选「引用笔试结果」时才引入最近笔试错误题；未勾选则不引用
+        boolean include = Boolean.TRUE.equals(referenceWrittenTestFlags.get(session.getId()));
         if (!include || writtenSessions.isEmpty()) {
             return null;
         }
@@ -806,6 +812,11 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         if (personas.isEmpty()) {
             throw new BusinessException("暂无可用面试官人设，请先配置");
         }
-        return personas.get(0);
+        // 未指定时从预设中随机分配（避免总是固定第一个）
+        List<InterviewerPersona> presets = personas.stream()
+                .filter(p -> Boolean.TRUE.equals(p.getIsPreset()))
+                .toList();
+        List<InterviewerPersona> pool = presets.isEmpty() ? personas : presets;
+        return pool.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(pool.size()));
     }
 }

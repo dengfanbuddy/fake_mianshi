@@ -33,6 +33,8 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -127,6 +129,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
     private final com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
 
+    /** 注入自身代理：异步线程里通过代理调用带 @Transactional 的方法，避免自调用绕过事务 */
+    @org.springframework.context.annotation.Lazy
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.fakemianshi.service.AnalysisService self;
+
     /** 分析生成中标记（防重复触发） */
     private final java.util.Set<Long> analyzingSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -140,16 +147,15 @@ public class AnalysisServiceImpl implements AnalysisService {
         if (!sessionAnalysisRepository.findBySessionId(sessionId).isEmpty()) {
             return;
         }
-        if (!analyzingSessions.add(sessionId)) {
+        if (isAnalyzing(sessionId)) {
             return; // 已在生成中
         }
         analysisExecutor.execute(() -> {
             try {
-                analyzeSession(sessionId);
+                // 经代理调用，保证 @Transactional 生效（三步写库原子）；analyzeSession 内部有 analyzingSessions 防重
+                self.analyzeSession(sessionId);
             } catch (Exception e) {
                 log.warn("会话分析异步生成失败: sessionId={}, cause={}", sessionId, e.getMessage());
-            } finally {
-                analyzingSessions.remove(sessionId);
             }
         });
     }
@@ -157,7 +163,16 @@ public class AnalysisServiceImpl implements AnalysisService {
     @Override
     @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {
-        return analyzeSessionInternal(sessionId, null, null);
+        // 与流式入口统一用 analyzingSessions 防重，避免并发（afterCommit 自动触发 + 手动触发）重复调用 LLM / 重复插库
+        if (!analyzingSessions.add(sessionId)) {
+            List<SessionAnalysis> existing = sessionAnalysisRepository.findBySessionId(sessionId);
+            return existing.isEmpty() ? null : existing.get(0);
+        }
+        try {
+            return analyzeSessionInternal(sessionId, null, null);
+        } finally {
+            analyzingSessions.remove(sessionId);
+        }
     }
 
     @Override
@@ -221,6 +236,11 @@ public class AnalysisServiceImpl implements AnalysisService {
         for (QuestionAnalysis qa : parseQuestionAnalyses(analysisNode, sessionId, type)) {
             qa.setSessionId(sessionId);
             questionAnalysisRepository.insert(qa);
+        }
+
+        // 笔试：把 LLM 对简答题的评分回写到答案，修正总分
+        if (TYPE_WRITTEN.equals(type)) {
+            writeBackShortAnswerScores(sessionId, analysisNode);
         }
 
         // 返回前自动更新弱点标签
@@ -350,13 +370,49 @@ public class AnalysisServiceImpl implements AnalysisService {
                 WeaknessTag newTag = new WeaknessTag();
                 newTag.setProjectId(projectId);
                 newTag.setKnowledgePoint(point);
-                newTag.setMasteryLevel("WEAK");
+                newTag.setMasteryLevel(resolveMasteryLevel(1)); // 首次出现 = 轻微(FAIR)
                 newTag.setOccurrenceCount(1);
                 newTag.setLastSessionId(sessionId);
                 newTag.setUpdatedAt(LocalDateTime.now());
                 weaknessTagRepository.insert(newTag);
                 tags.add(newTag); // 供同批后续知识点匹配
             }
+        }
+    }
+
+    /** 笔试简答题评分回流：把 LLM 分析出的 accuracy(0-10) 折算成简答题得分（满分 5 分）回写 written_test_answer */
+    private void writeBackShortAnswerScores(Long sessionId, JsonNode analysisNode) {
+        JsonNode arr = analysisNode.get("questionAnalyses");
+        if (arr == null || !arr.isArray()) {
+            return;
+        }
+        List<WrittenTestQuestion> questions = writtenTestQuestionRepository.findBySessionIdOrderByOrderNum(sessionId);
+        Map<Long, WrittenTestQuestion> questionById = questions.stream()
+                .collect(Collectors.toMap(WrittenTestQuestion::getId, Function.identity(), (a, b) -> a));
+        Map<Long, WrittenTestAnswer> answerByQuestion = writtenTestAnswerRepository.findBySessionId(sessionId).stream()
+                .collect(Collectors.toMap(WrittenTestAnswer::getQuestionId, Function.identity(), (a, b) -> a));
+
+        for (JsonNode item : arr) {
+            Long qid = resolveQuestionRefId(item, TYPE_WRITTEN, questions, List.of());
+            if (qid == null) {
+                continue;
+            }
+            WrittenTestQuestion q = questionById.get(qid);
+            if (q == null || !"SHORT_ANSWER".equals(q.getType())) {
+                continue;
+            }
+            Double accuracy = numericOrNull(item, "accuracy");
+            if (accuracy == null) {
+                continue;
+            }
+            WrittenTestAnswer answer = answerByQuestion.get(qid);
+            if (answer == null) {
+                continue;
+            }
+            double score = BigDecimal.valueOf(5.0 * accuracy / 10.0)
+                    .setScale(1, RoundingMode.HALF_UP).doubleValue();
+            answer.setScore(score);
+            writtenTestAnswerRepository.updateById(answer);
         }
     }
 
@@ -381,6 +437,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         dto.setCharacterTraits(parseStringList(analysis.getCharacterTraits()));
         dto.setCharacterDefects(parseJsonNodeList(analysis.getCharacterDefects()));
         dto.setCommunicationEvaluation(analysis.getCommunicationEvaluation());
+        dto.setHumorSummary(analysis.getHumorSummary());
         dto.setImprovementPlan(parseMap(analysis.getImprovementPlan()));
 
         List<Map<String, Object>> qaMaps = new ArrayList<>();
@@ -563,6 +620,7 @@ public class AnalysisServiceImpl implements AnalysisService {
         analysis.setCharacterTraits(toJsonArrayString(node.get("characterTraits")));
         analysis.setCharacterDefects(toJsonArrayString(node.get("characterDefects")));
         analysis.setCommunicationEvaluation(textOrNull(node, "communicationEvaluation"));
+        analysis.setHumorSummary(textOrNull(node, "humorSummary"));
         analysis.setImprovementPlan(toJsonString(node.get("improvementPlan")));
         return analysis;
     }
@@ -665,15 +723,12 @@ public class AnalysisServiceImpl implements AnalysisService {
         return null;
     }
 
-    /** 按累计出现次数判断掌握程度：>=3 次 WEAK（反复出现），2 次 FAIR，1 次 GOOD */
+    /**
+     * 按累计出现次数判断薄弱程度：出现 >=2 次为 WEAK（顽固弱点），1 次为 FAIR（轻微）。
+     * 弱点标签仅记录"曾经薄弱"的知识点，故取值限定 WEAK/FAIR；GOOD/STRONG 预留给未来"已掌握/提升"判定。
+     */
     private String resolveMasteryLevel(int occurrenceCount) {
-        if (occurrenceCount >= 3) {
-            return "WEAK";
-        }
-        if (occurrenceCount == 2) {
-            return "FAIR";
-        }
-        return "GOOD";
+        return occurrenceCount >= 2 ? "WEAK" : "FAIR";
     }
 
     /**

@@ -71,11 +71,11 @@ public class AudioStorageUtil {
             throw new BusinessException("音频文件路径不能为空");
         }
         Path root = Paths.get(audioDir).toAbsolutePath().normalize();
-        Path path = Paths.get(filePath);
+        Path path = Paths.get(filePath).normalize();
         if (!path.isAbsolute()) {
             path = root.resolve(path).normalize();
         }
-        // 防止路径穿越：相对路径解析结果必须仍位于音频目录内
+        // 防止路径穿越：绝对/相对路径统一 normalize 后必须仍位于音频目录内
         if (!path.startsWith(root)) {
             throw new BusinessException("音频文件路径非法: " + filePath);
         }

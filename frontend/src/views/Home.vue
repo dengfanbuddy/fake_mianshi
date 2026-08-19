@@ -10,8 +10,8 @@ const stats = ref({ projectCount: 0, sessionCount: 0, writtenCount: 0, mockCount
 const recentProjects = ref([])
 
 const techStack = [
-  { name: 'Spring Boot 4.1', role: '后端框架', desc: 'Java 17 · REST API · JPA' },
-  { name: 'SQLite', role: '数据库', desc: '零配置本地存储 · Hibernate 方言' },
+  { name: 'Spring Boot 4.1', role: '后端框架', desc: 'Java 17 · REST API · MyBatis-Plus' },
+  { name: 'SQLite', role: '数据库', desc: '零配置本地存储 · WAL 模式' },
   { name: 'Vue 3 + Vite', role: '前端框架', desc: 'Composition API · 组件化' },
   { name: 'Element Plus', role: 'UI 组件库', desc: '现代化交互组件' },
   { name: 'DeepSeek API', role: 'AI 引擎', desc: '出题 · 面试对话 · 分析报告' },

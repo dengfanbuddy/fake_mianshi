@@ -25,7 +25,9 @@ async function fetchVoiceStatus() {
       appIdConfigured.value = !!res.data.appIdConfigured
     }
   } catch (e) {
-    // 拦截器已提示；加载失败保持 null
+    // 拦截器已提示；加载失败按未配置处理，避免永久显示"检测中"
+    voiceConfigured.value = false
+    appIdConfigured.value = false
   }
 }
 

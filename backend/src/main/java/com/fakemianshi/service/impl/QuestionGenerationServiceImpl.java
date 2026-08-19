@@ -77,10 +77,15 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
      * 构建笔试出题 system prompt：要求严格输出 JSON 数组（流式推送原文供前端实时展示）。
      */
     private String buildWrittenTestPrompt(Long projectId, int questionCount) {
-        return promptTemplateService.getTemplate(
+        String template = promptTemplateService.getTemplate(
                 resolveOccupation(projectId),
                 com.fakemianshi.service.PromptTemplateService.Scene.WRITTEN_QUESTION.name(),
                 resolvePosition(projectId));
+        // 注入实际题数：优先替换 {questionCount} 占位，否则替换"给定数量"措辞（兼容旧模板）
+        if (template.contains("{questionCount}")) {
+            return template.replace("{questionCount}", String.valueOf(questionCount));
+        }
+        return template.replace("给定数量", String.valueOf(questionCount) + " 道");
     }
 
     /** 项目目标岗位（职业）；无则 null（走 default 模板） */

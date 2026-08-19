@@ -24,7 +24,7 @@ const idleElapsed = ref(0)
 const streamText = ref('') // 流式原文（JSON）
 const streamReasoning = ref('') // AI 思考过程（思考中提示）
 const genTitle = computed(() => {
-  if (streamText.value) return 'AI 正在生成题目，边写边展示…'
+  if (streamText.value) return 'AI 正在生成题目…'
   if (streamReasoning.value) return 'AI 正在思考，即将开始输出…'
   return 'AI 正在准备题目…'
 })
@@ -157,11 +157,15 @@ function handleDone(data) {
     return
   }
   if (res?.sessionId) {
+    // 以服务端返回的 startedAt 为基准计算截止时间，避免刷新后重置倒计时
+    const deadline = res.startedAt
+      ? res.startedAt + (res.timeLimit || 60) * 60000
+      : Date.now() + (res.timeLimit || 60) * 60000
     store.save({
       sessionId: res.sessionId,
       projectId,
       timeLimit: res.timeLimit,
-      deadline: Date.now() + res.timeLimit * 60000,
+      deadline,
       questions: res.questions || [],
       flow: flowFull ? 'full' : null,
     })
@@ -203,15 +207,12 @@ onBeforeUnmount(() => {
             <span class="gen-elapsed">已等待 {{ elapsed }} 秒</span>
           </div>
         </div>
-        <div class="gen-stream raw-text">
-          <template v-if="streamText">{{ streamText }}</template>
-          <template v-else-if="streamReasoning">
-            <div class="reasoning-box">
-              <div class="thinking-hint">🤔 AI 正在思考中（已思考 {{ streamReasoning.length }} 字）…</div>
-              <pre class="thinking-text">{{ streamReasoning }}</pre>
-            </div>
-          </template>
-          <template v-else>正在连接 AI，开始生成题目…</template>
+        <div class="gen-stream">
+          <div class="gen-progress-hint">
+            <span v-if="streamText">✍️ 正在生成题目（已生成 {{ streamText.length }} 字）…</span>
+            <span v-else-if="streamReasoning">🤔 AI 正在思考中…</span>
+            <span v-else>正在连接 AI，开始生成题目…</span>
+          </div>
         </div>
         <div class="gen-tip">正在实时预览 AI 生成的题目，完成后自动进入考试；若中断会提示重试。</div>
       </div>
@@ -341,6 +342,10 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-all;
   overflow-wrap: anywhere;
+}
+.gen-progress-hint {
+  text-align: center;
+  color: #606266;
 }
 .reasoning-box {
   display: flex;

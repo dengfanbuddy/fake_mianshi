@@ -17,6 +17,7 @@ const project = ref(null)
 const projectLoading = ref(false)
 const editDialogVisible = ref(false)
 const savingProject = ref(false)
+const deleting = ref(false)
 const editForm = ref({ name: '', targetPosition: '', description: '' })
 
 async function fetchProject() {
@@ -27,6 +28,7 @@ async function fetchProject() {
       project.value = res.data
       editForm.value = {
         name: res.data?.name || '',
+        targetPosition: res.data?.targetPosition || '',
         description: res.data?.description || '',
       }
     } else {
@@ -42,6 +44,7 @@ async function fetchProject() {
 function openEdit() {
   editForm.value = {
     name: project.value?.name || '',
+    targetPosition: project.value?.targetPosition || '',
     description: project.value?.description || '',
   }
   editDialogVisible.value = true
@@ -56,8 +59,8 @@ async function handleSaveProject() {
   try {
     const res = await updateProject(projectId, {
       name: editForm.value.name.trim(),
-      targetPosition: editForm.value.targetPosition.trim(),
-      description: editForm.value.description.trim(),
+      targetPosition: (editForm.value.targetPosition || '').trim(),
+      description: (editForm.value.description || '').trim(),
     })
     if (res.code === 200) {
       ElMessage.success('项目已更新')
@@ -74,6 +77,8 @@ async function handleSaveProject() {
 }
 
 async function handleDeleteProject() {
+  if (deleting.value) return
+  deleting.value = true
   try {
     const res = await deleteProject(projectId)
     if (res.code === 200) {
@@ -84,6 +89,8 @@ async function handleDeleteProject() {
     }
   } catch (e) {
     // 拦截器已提示
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -117,6 +124,20 @@ async function fetchResume() {
   } finally {
     resumeLoading.value = false
   }
+}
+
+// 上传前校验：仅 PDF、大小 ≤ 10MB
+function beforePdfUpload(file) {
+  const isPdf = file.type === 'application/pdf' || (file.name || '').toLowerCase().endsWith('.pdf')
+  if (!isPdf) {
+    ElMessage.warning('仅支持 PDF 格式的简历')
+    return false
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    ElMessage.warning('简历文件不能超过 10MB')
+    return false
+  }
+  return true
 }
 
 async function handleUpload(options) {
@@ -344,6 +365,8 @@ async function fetchSessions() {
 }
 
 async function handleDeleteSession(sessionId) {
+  if (deleting.value) return
+  deleting.value = true
   try {
     const res = await deleteSession(sessionId)
     if (res.code === 200) {
@@ -354,6 +377,8 @@ async function handleDeleteSession(sessionId) {
     }
   } catch (e) {
     // 拦截器已提示
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -476,6 +501,7 @@ onMounted(() => {
           accept=".pdf"
           :show-file-list="false"
           :http-request="handleUpload"
+          :before-upload="beforePdfUpload"
           :disabled="uploading || analyzing"
         >
           <div class="upload-inner">
@@ -753,6 +779,9 @@ onMounted(() => {
       <el-form label-width="80px">
         <el-form-item label="项目名称" required>
           <el-input v-model="editForm.name" maxlength="100" />
+        </el-form-item>
+        <el-form-item label="目标岗位">
+          <el-input v-model="editForm.targetPosition" maxlength="200" placeholder="如：Java 后端高级工程师" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="editForm.description" type="textarea" :rows="3" maxlength="500" />

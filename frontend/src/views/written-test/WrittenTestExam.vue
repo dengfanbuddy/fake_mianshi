@@ -1,15 +1,16 @@
 <script setup>
-import { ref, computed, reactive, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { submitTest, getExamInProgress } from '../../api/written-test'
 import { useWrittenTestStore } from '../../stores/writtenTest'
 
-// 题目内容支持 markdown 渲染（代码块、列表等）
+// 题目内容支持 markdown 渲染（代码块、列表等），经 DOMPurify 消毒防 XSS
 function renderMd(text) {
   if (!text) return ''
-  return marked.parse(text)
+  return DOMPurify.sanitize(marked.parse(text))
 }
 
 const route = useRoute()
@@ -22,6 +23,37 @@ const answers = reactive({})
 const remaining = ref(0)
 const submitting = ref(false)
 const loaded = ref(false)
+
+// 答题内容持久化到 sessionStorage，刷新后可恢复（避免已答内容丢失）
+const ANSWERS_KEY = `written-test:answers:${sessionId}`
+function persistAnswers() {
+  try {
+    sessionStorage.setItem(ANSWERS_KEY, JSON.stringify(answers))
+  } catch (e) {
+    // 忽略写入失败
+  }
+}
+function restoreAnswers() {
+  try {
+    const raw = sessionStorage.getItem(ANSWERS_KEY)
+    if (raw) {
+      const saved = JSON.parse(raw)
+      for (const [k, v] of Object.entries(saved)) {
+        if (k in answers) answers[k] = v
+      }
+    }
+  } catch (e) {
+    // 忽略损坏的缓存
+  }
+}
+function clearAnswers() {
+  try {
+    sessionStorage.removeItem(ANSWERS_KEY)
+  } catch (e) {
+    // 忽略
+  }
+}
+watch(answers, persistAnswers, { deep: true })
 
 const qRefs = []
 
@@ -47,6 +79,7 @@ function isAnswered(q) {
 }
 
 const answeredCount = computed(() => questions.value.filter(q => isAnswered(q)).length)
+const unansweredCount = computed(() => questions.value.length - answeredCount.value)
 
 const typeLabel = {
   SINGLE_CHOICE: '单选题',
@@ -128,6 +161,7 @@ async function handleSubmit() {
   try {
     const res = await submitTest(sessionId, buildAnswers())
     if (res.code === 200) {
+      clearAnswers()
       const pid = store.session?.projectId
       const flow = store.session?.flow
       store.clear()
@@ -160,14 +194,17 @@ onMounted(async () => {
     const res = await getExamInProgress(sessionId)
     if (res.code === 200 && res.data?.questions?.length) {
       const dto = res.data
+      const deadline = dto.startedAt
+        ? dto.startedAt + (dto.timeLimit || 60) * 60000
+        : Date.now() + (dto.timeLimit || 60) * 60000
       store.save({
         sessionId,
         projectId: dto.projectId || route.query.projectId || session?.projectId || null,
         timeLimit: dto.timeLimit,
-        deadline: Date.now() + dto.timeLimit * 60000,
+        deadline,
         questions: dto.questions,
       })
-      initExam(dto.questions, Date.now() + dto.timeLimit * 60000)
+      initExam(dto.questions, deadline)
       return
     }
   } catch (e) {
@@ -183,6 +220,8 @@ function initExam(list, deadline) {
   for (const q of questions.value) {
     answers[q.id] = q.type === 'MULTIPLE_CHOICE' ? [] : ''
   }
+  // 恢复刷新前已填写的答案
+  restoreAnswers()
   loaded.value = true
   startCountdown(deadline)
 }
@@ -287,10 +326,10 @@ onBeforeUnmount(() => {
             <span class="legend-item"><span class="dot"></span>未答</span>
           </div>
           <el-popconfirm
-            title="确认要交卷吗？"
+            :title="unansweredCount > 0 ? `还有 ${unansweredCount} 题未答，确认要交卷吗？` : '确认要交卷吗？'"
             confirm-button-text="确认交卷"
             cancel-button-text="再检查一下"
-            width="220"
+            width="260"
             @confirm="handleSubmit"
           >
             <template #reference>

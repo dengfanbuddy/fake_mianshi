@@ -40,7 +40,8 @@ public class SessionController {
     /** 查询单个会话信息（含 projectId，供报告页返回所属项目） */
     @GetMapping("/{sessionId}")
     public ApiResponse<InterviewSession> get(@PathVariable Long sessionId) {
-        return ApiResponse.success(Optional.ofNullable(sessionRepository.selectById(sessionId)).orElse(null));
+        return ApiResponse.success(Optional.ofNullable(sessionRepository.selectById(sessionId))
+                .orElseThrow(() -> new com.fakemianshi.config.ResourceNotFoundException("会话不存在: id=" + sessionId)));
     }
 
     /** 删除单个会话及其子数据、录音文件 */

@@ -57,6 +57,10 @@ public class SessionAnalysis {
     @TableField("communication_evaluation")
     private String communicationEvaluation;
 
+    /** 幽默化总结（AI 根据能力水平给出的善意调侃/夸赞） */
+    @TableField("humor_summary")
+    private String humorSummary;
+
     /** 改进计划（JSON） */
     @TableField("improvement_plan")
     private String improvementPlan;

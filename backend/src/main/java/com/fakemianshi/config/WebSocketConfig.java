@@ -22,6 +22,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(interviewVoiceWebSocketHandler, "/ws/interview")
-                .setAllowedOriginPatterns("*");
+                // 仅允许本机来源，防止跨站 WebSocket 劫持（CSWSH）驱动面试/消耗额度
+                .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*");
     }
 }

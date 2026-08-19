@@ -67,8 +67,11 @@ public class ProjectServiceImpl implements ProjectService {
     @Transactional
     public InterviewProject update(Long id, InterviewProject project) {
         InterviewProject existing = findById(id);
-        existing.setName(project.getName());
+        if (project.getName() != null && !project.getName().isBlank()) {
+            existing.setName(project.getName());
+        }
         existing.setDescription(project.getDescription());
+        existing.setTargetPosition(project.getTargetPosition());
         projectRepository.updateById(existing);
         return existing;
     }

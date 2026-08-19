@@ -41,6 +41,7 @@ const thinking = computed(() => sending.value && !streamingInProgress.value) // 
 const personas = ref([])
 const selectedPersonaId = ref(null)
 const referenceWrittenTest = ref(false)
+const recording = ref(false) // 是否正在按住录音（用于禁用文字输入，避免并行提交）
 const textInput = ref('')
 const autoTts = ref(true)
 
@@ -112,6 +113,10 @@ const outlineSections = computed(() => {
 
 // ---------- 初始化 ----------
 onMounted(async () => {
+  // 完整流程（笔试→面试）：自动勾选「引用笔试结果」
+  if (route.query.refWritten === '1' || route.query.refWritten === 'true') {
+    referenceWrittenTest.value = true
+  }
   await loadPersonas()
   if (sessionId.value) {
     await loadHistory()
@@ -370,6 +375,7 @@ function ensurePcmPlayer() {
 }
 
 function onRecStart() {
+  recording.value = true
   wsReady.value = false
   partialText.value = ''
   streamingWsBubble.value = null
@@ -447,6 +453,7 @@ function onRecChunk(int16) {
 }
 
 async function onRecRecorded(blob) {
+  recording.value = false
   if (wsReady.value && voiceStream) {
     // 流式模式：松开发送，后续由 WS 事件驱动
     sending.value = true
@@ -904,15 +911,16 @@ watch(
             class="text-input"
             type="textarea"
             :rows="1"
+            :autosize="{ minRows: 1, maxRows: 4 }"
             resize="none"
-            placeholder="输入你的回答，或按住左侧按钮说话…"
-            :disabled="sending || recognizing || ended"
+            placeholder="输入你的回答（Shift+Enter 换行），或按住左侧按钮说话…"
+            :disabled="sending || recognizing || recording || ended"
             @keyup.enter.exact.prevent="sendText"
           />
           <el-button
             type="primary"
             :loading="sending"
-            :disabled="recognizing || ended"
+            :disabled="recognizing || recording || ended"
             @click="sendText"
           >
             发送

@@ -55,12 +55,13 @@ export const respondMockInterviewStream = async (sessionId, data, onEvent) => {
 
 function parseSse(raw) {
   let event = 'message'
-  let data = ''
+  const dataLines = []
   for (const line of raw.split('\n')) {
     if (line.startsWith('event:')) event = line.slice(6).trim()
-    else if (line.startsWith('data:')) data += line.slice(5).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
   }
-  if (!data) return null
+  if (!dataLines.length) return null
+  const data = dataLines.join('\n')
   let parsed
   try { parsed = JSON.parse(data) } catch { parsed = data }
   return { event, data: parsed }

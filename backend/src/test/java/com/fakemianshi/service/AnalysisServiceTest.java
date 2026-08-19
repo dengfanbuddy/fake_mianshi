@@ -190,13 +190,13 @@ class AnalysisServiceTest {
         WeaknessTag jvm = weaknessTagsStore.stream()
                 .filter(t -> "JVM垃圾回收".equals(t.getKnowledgePoint())).findFirst().orElseThrow();
         assertEquals(2, jvm.getOccurrenceCount());
-        assertEquals("FAIR", jvm.getMasteryLevel());
+        assertEquals("WEAK", jvm.getMasteryLevel());
         assertEquals(1L, jvm.getLastSessionId());
 
         WeaknessTag spring = weaknessTagsStore.stream()
                 .filter(t -> "Spring事务传播机制".equals(t.getKnowledgePoint())).findFirst().orElseThrow();
         assertEquals(1, spring.getOccurrenceCount());
-        assertEquals("WEAK", spring.getMasteryLevel());
+        assertEquals("FAIR", spring.getMasteryLevel());
         assertEquals(1L, spring.getLastSessionId());
     }
 
@@ -253,7 +253,7 @@ class AnalysisServiceTest {
         // 弱点标签从新格式对象的 point 字段提取
         WeaknessTag aqs = weaknessTagsStore.stream()
                 .filter(t -> "AQS原理".equals(t.getKnowledgePoint())).findFirst().orElseThrow();
-        assertEquals("WEAK", aqs.getMasteryLevel());
+        assertEquals("FAIR", aqs.getMasteryLevel());
         assertEquals(1, aqs.getOccurrenceCount());
 
         // 单题分析新字段
@@ -398,13 +398,13 @@ class AnalysisServiceTest {
         assertEquals(2, weaknessTagsStore.size());
         WeaknessTag jvm = weaknessTagsStore.get(0);
         assertEquals(2, jvm.getOccurrenceCount());
-        assertEquals("FAIR", jvm.getMasteryLevel());
+        assertEquals("WEAK", jvm.getMasteryLevel());
         assertEquals(1L, jvm.getLastSessionId());
 
         WeaknessTag spring = weaknessTagsStore.get(1);
         assertEquals("Spring事务传播机制", spring.getKnowledgePoint());
         assertEquals(1, spring.getOccurrenceCount());
-        assertEquals("WEAK", spring.getMasteryLevel());
+        assertEquals("FAIR", spring.getMasteryLevel());
         assertEquals(1L, spring.getLastSessionId());
         assertEquals(10L, spring.getProjectId());
     }

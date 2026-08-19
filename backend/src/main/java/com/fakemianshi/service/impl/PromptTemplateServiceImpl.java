@@ -42,7 +42,7 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
             2. 单选题/多选题要有明确的唯一（或确定组合）答案，选项表达清晰；
             3. 填空题答案简短明确；简答题给出参考答案要点；
             4. 每道题标注 knowledgePoints（该题考察的知识点，必须是岗位相关的具体知识点）；
-            5. 题量按给定数量生成，难度从基础到进阶合理分布；
+            5. 题目数量为 {questionCount} 道，难度从基础到进阶合理分布；
             6. 题型分布：单选 50%、多选 15%、填空 10%、简答 25%（可微调）。
             请严格返回如下 JSON 数组，不要输出任何额外文字或 Markdown 代码块，数组每项格式：
             {"type":"SINGLE_CHOICE","content":"...","options":["A","B","C","D"],"answer":"A","explanation":"...","knowledgePoints":["知识点"]}

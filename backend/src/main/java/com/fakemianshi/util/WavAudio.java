@@ -94,6 +94,9 @@ public final class WavAudio {
         while (offset + 8 <= wav.length) {
             String id = new String(wav, offset, 4, StandardCharsets.US_ASCII);
             int size = readIntLE(wav, offset + 4);
+            if (size < 0 || offset + 8 + size > wav.length) {
+                return null; // 非法 chunk 大小，防止越界/死循环
+            }
             if ("data".equals(id)) {
                 dataOffset = offset + 8;
                 dataLen = size;
@@ -101,7 +104,7 @@ public final class WavAudio {
             }
             offset += 8 + size + (size % 2); // chunk 按 2 字节对齐
         }
-        if (dataOffset < 0 || dataOffset + dataLen > wav.length) {
+        if (dataOffset < 0 || dataLen < 0 || dataOffset + dataLen > wav.length) {
             return null;
         }
         byte[] pcm = new byte[dataLen];

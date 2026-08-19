@@ -26,7 +26,9 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
 
     @Override
     public List<AIModelConfig> findAll() {
-        return repository.selectList(null);
+        List<AIModelConfig> list = repository.selectList(null);
+        list.forEach(this::maskKey);
+        return list;
     }
 
     @Override
@@ -35,10 +37,13 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
         if (config.getIsActive() == null) {
             config.setIsActive(false);
         }
-        // 编辑场景（带 id）：保留服务端管理的 createdAt，避免 JPA merge 将其覆盖为 null
+        // 编辑场景（带 id）：保留服务端管理的 createdAt；密钥留空/脱敏值则保留原值
         if (config.getId() != null) {
-            Optional.ofNullable(repository.selectById(config.getId())).ifPresent(existing ->
-                    config.setCreatedAt(existing.getCreatedAt()));
+            AIModelConfig existing = repository.selectById(config.getId());
+            if (existing != null) {
+                config.setCreatedAt(existing.getCreatedAt());
+                config.setApiKey(resolveApiKey(config.getApiKey(), existing.getApiKey()));
+            }
         }
         if (Boolean.TRUE.equals(config.getIsActive())) {
             deactivateOthers(config.getId());
@@ -48,7 +53,7 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
         } else {
             repository.updateById(config);
         }
-        return config;
+        return maskKey(config);
     }
 
     @Override
@@ -59,7 +64,33 @@ public class AIModelConfigServiceImpl implements AIModelConfigService {
         deactivateOthers(id);
         target.setIsActive(true);
         repository.updateById(target);
-        return target;
+        return maskKey(target);
+    }
+
+    /** 入参为空或脱敏值（含 *）时保留原密钥，否则返回入参（trim 后） */
+    private String resolveApiKey(String input, String original) {
+        if (input == null || input.isBlank() || input.contains("*")) {
+            return original;
+        }
+        return input.trim();
+    }
+
+    /** 脱敏返回：apiKey 只保留前 3 后 3 */
+    private AIModelConfig maskKey(AIModelConfig config) {
+        if (config != null && config.getApiKey() != null && !config.getApiKey().isBlank()) {
+            config.setApiKey(mask(config.getApiKey()));
+        }
+        return config;
+    }
+
+    private String mask(String s) {
+        if (s == null || s.isBlank()) {
+            return s;
+        }
+        if (s.length() <= 6) {
+            return "******";
+        }
+        return s.substring(0, 3) + "****" + s.substring(s.length() - 3);
     }
 
     /** 将除 selfId 之外所有 active 的配置设为 false */

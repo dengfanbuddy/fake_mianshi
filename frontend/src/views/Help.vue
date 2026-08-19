@@ -24,14 +24,14 @@ const aiSteps = [
 
 const voiceSteps = [
   { title: '1. 开通服务', desc: '登录腾讯云控制台，开通「语音识别」（一句话识别）与「语音合成」服务（有免费额度）。', link: '语音识别控制台 → https://console.cloud.tencent.com/asr', },
-  { title: '2. 配置密钥', desc: '在后端环境变量中配置（重启后端生效）：TENCENT_SECRET_ID、TENCENT_SECRET_KEY、TENCENT_APP_ID。', },
+  { title: '2. 配置密钥', desc: '在「设置 → 腾讯云语音配置」页填写 SecretId、SecretKey、AppId 并保存（立即生效，无需重启）；也可用环境变量 TENCENT_SECRET_ID / TENCENT_SECRET_KEY / TENCENT_APP_ID 配置。', },
   { title: '3. 验证', desc: '设置页会显示"已配置"状态；模拟面试中录音说话即用 STT，面试官回复自动 TTS 朗读。', },
   { title: '4. 更换其他语音服务商', desc: '系统语音服务已接口化（VoiceService），当前实现为腾讯云。如需接入阿里云/讯飞等，在后端新增对应实现类（如 AliyunVoiceServiceImpl）并替换注入即可，前端无需改动。', },
 ]
 
 const faqs = [
   { q: 'AI 出题/分析报错怎么办？', a: '确认设置页 AI 模型配置已启用且 API Key 正确；报"格式异常"时重启后端后重试"重新生成分析"。' },
-  { q: '语音识别/合成不可用？', a: '确认腾讯云两个服务都已开通、后端环境变量已配置且重启过；设置页查看语音配置状态。' },
+  { q: '语音识别/合成不可用？', a: '确认腾讯云两个服务都已开通，并在「设置 → 腾讯云语音配置」填写 SecretId/SecretKey/AppId 保存（实时语音识别还需 AppId）；设置页可查看配置状态。' },
   { q: '换面试官后声音没变？', a: '不同风格映射不同音色（严肃/压力→男声、温和→女声）；若自定义风格未设置 tone 字段则用默认音色。' },
   { q: '数据存在哪里？', a: '全部存在本地 backend/data/fake_mianshi.db（SQLite），简历 PDF 和录音在 backend/uploads/。' },
 ]

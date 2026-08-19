@@ -67,7 +67,6 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     private final AnalysisService analysisService;
 
     @Override
-    @Transactional
     public WrittenTestStartResponse start(Long projectId, WrittenTestStartRequest req) {
         InterviewSession session = createSession(projectId, req);
 
@@ -78,7 +77,6 @@ public class WrittenTestServiceImpl implements WrittenTestService {
     }
 
     @Override
-    @Transactional
     public WrittenTestStartResponse streamStart(Long projectId, WrittenTestStartRequest req,
                                                 java.util.function.Consumer<String> onDelta,
                                                 java.util.function.Consumer<String> onReasoning) {
@@ -112,6 +110,8 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         WrittenTestStartResponse response = new WrittenTestStartResponse();
         response.setSessionId(session.getId());
         response.setTimeLimit(session.getTimeLimit());
+        response.setStartedAt(session.getStartedAt() == null ? null
+                : session.getStartedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
         response.setQuestions(examQuestions);
         return response;
     }
