@@ -68,6 +68,30 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
             - topics 必须是该岗位具体相关的主题。
             """;
 
+    /** 简历分析默认模板（通用） */
+    private static final String DEFAULT_RESUME_ANALYSIS = """
+            你是一名资深的技术面试官。请分析候选人的简历内容，并严格以 JSON 格式输出结构化分析结果，不要输出任何额外文字或 Markdown 代码块。
+            输出 JSON 字段如下：
+            {
+              "experienceYears": 工作经验年数（数字）,
+              "currentPosition": 当前职位（字符串）,
+              "techStack": 技术栈（字符串数组）,
+              "projects": 项目经验描述（字符串数组）,
+              "education": 教育背景（字符串）,
+              "suggestedPosition": 建议应聘的岗位（字符串）,
+              "suggestedSeniority": 建议职级（如 初级/中级/高级，字符串）,
+              "companyType": 目标公司类型（如 大厂/创业公司/外企/不限，字符串）
+            }
+            """;
+
+    /** 面试官开场白默认模板（通用），占位符：{personaName}/{personaDesc}/{position}/{experience} */
+    private static final String DEFAULT_MOCK_OPENING = """
+            你是{personaName}，面试风格是：{personaDesc}。
+            请用一句话进行开场自我介绍并开始面试，语气要符合你的风格。
+            候选人应聘岗位：{position}，经验：{experience}。
+            要求：只说一句自然、贴合风格的开场白，不要输出 JSON 或任何额外解释。
+            """;
+
     /** 笔试分析默认模板（通用） */
     private static final String DEFAULT_WRITTEN_ANALYSIS = """
             你是资深面试官。请分析以下「{position}」岗位的笔试结果，为候选人生成一份查漏补缺的分析报告。
@@ -138,6 +162,8 @@ public class PromptTemplateServiceImpl implements PromptTemplateService {
     static {
         DEFAULT_TEMPLATES.put(Scene.WRITTEN_QUESTION.name(), DEFAULT_WRITTEN_QUESTION);
         DEFAULT_TEMPLATES.put(Scene.MOCK_OUTLINE.name(), DEFAULT_MOCK_OUTLINE);
+        DEFAULT_TEMPLATES.put(Scene.RESUME_ANALYSIS.name(), DEFAULT_RESUME_ANALYSIS);
+        DEFAULT_TEMPLATES.put(Scene.MOCK_OPENING.name(), DEFAULT_MOCK_OPENING);
         DEFAULT_TEMPLATES.put(Scene.WRITTEN_ANALYSIS.name(), DEFAULT_WRITTEN_ANALYSIS);
         DEFAULT_TEMPLATES.put(Scene.MOCK_ANALYSIS.name(), DEFAULT_MOCK_ANALYSIS);
         DEFAULT_TEMPLATES.put(Scene.HISTORY_ANALYSIS.name(), DEFAULT_HISTORY_ANALYSIS);

@@ -8,6 +8,7 @@ import com.fakemianshi.entity.HistoricalAnalysis;
 import com.fakemianshi.service.AnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PreDestroy;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,6 +36,11 @@ public class AnalysisController {
 
     /** 分析流式推送用线程池 */
     private final ExecutorService sseExecutor = Executors.newCachedThreadPool();
+
+    @PreDestroy
+    public void shutdown() {
+        sseExecutor.shutdownNow();
+    }
 
     /**
      * 获取会话分析报告；尚未生成时异步触发生成并返回 null，前端轮询等待（避免同步阻塞 60s+）。

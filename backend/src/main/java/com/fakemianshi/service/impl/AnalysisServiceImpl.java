@@ -141,6 +141,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final java.util.concurrent.ExecutorService analysisExecutor =
             java.util.concurrent.Executors.newCachedThreadPool();
 
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        analysisExecutor.shutdownNow();
+    }
+
     @Override
     public void triggerAnalyze(Long sessionId) {
         // 已存在分析则无需生成

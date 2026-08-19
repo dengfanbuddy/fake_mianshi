@@ -172,12 +172,14 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
         String jobTitle = req == null ? "目标岗位" : valueOrDash(req.getJobTitle());
         String experience = req == null ? "未知" : valueOrDash(req.getExperience());
 
-        String systemPrompt = """
-                你是%s，面试风格是：%s。
-                请用一句话进行开场自我介绍并开始面试，语气要符合你的风格。
-                候选人应聘岗位：%s，经验：%s。
-                要求：只说一句自然、贴合风格的开场白，不要输出 JSON 或任何额外解释。
-                """.formatted(valueOrDash(persona.getName()), valueOrDash(persona.getDescription()), jobTitle, experience);
+        // 开场白走提示词模板体系（可自定义）；{position} 由 getTemplate 替换为岗位名，其余占位符手动替换
+        String systemPrompt = promptTemplateService.getTemplate(
+                        resolveOccupation(projectId),
+                        com.fakemianshi.service.PromptTemplateService.Scene.MOCK_OPENING.name(),
+                        jobTitle)
+                .replace("{personaName}", valueOrDash(persona.getName()))
+                .replace("{personaDesc}", valueOrDash(persona.getDescription()))
+                .replace("{experience}", experience);
 
         return llmService.chat(systemPrompt, "请开始面试。").getContent();
     }

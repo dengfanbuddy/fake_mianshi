@@ -78,6 +78,7 @@ public class PositionRequirementServiceImpl implements PositionRequirementServic
             JsonNode root = OBJECT_MAPPER.readTree(resume.getAnalysisResult());
             req.setJobTitle(extractText(root, "suggestedPosition"));
             req.setSeniority(extractText(root, "suggestedSeniority"));
+            req.setCompanyType(extractText(root, "companyType"));
 
             // 经验年限：数字 → "X年"
             JsonNode expNode = root.get("experienceYears");

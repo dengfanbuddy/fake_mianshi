@@ -4,6 +4,7 @@ import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.entity.InterviewProject;
 import com.fakemianshi.service.ProjectService;
 import lombok.RequiredArgsConstructor;
+import jakarta.annotation.PreDestroy;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -60,6 +61,11 @@ public class ProjectController {
     /** 异步线程池：新职业提示词生成不阻塞项目创建/更新（单线程串行，避免并发写库锁冲突） */
     private final java.util.concurrent.ExecutorService templateExecutor =
             java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    @PreDestroy
+    public void shutdown() {
+        templateExecutor.shutdownNow();
+    }
 
     /** 新职业检测：目标岗位没有提示词模板时，后台由 AI 生成全部场景并保存 */
     private void ensureTemplates(InterviewProject project) {

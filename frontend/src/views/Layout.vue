@@ -1,8 +1,9 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
+const collapsed = ref(false)
 
 // 根据当前路由路径决定侧边栏激活项：业务页（项目/笔试/面试/分析）统一归属"项目管理"
 const activeMenu = computed(() => {
@@ -24,13 +25,17 @@ const activeMenu = computed(() => {
 
 <template>
   <el-container class="layout">
-    <el-aside width="240px" class="aside">
-      <div class="brand">
-        <div class="brand-name">AI面试模拟</div>
-        <div class="brand-sub">AI 面试训练</div>
+    <el-aside :width="collapsed ? '64px' : '240px'" class="aside">
+      <div class="brand" @click="collapsed = !collapsed">
+        <span class="brand-toggle">{{ collapsed ? '☰' : '☰' }}</span>
+        <template v-if="!collapsed">
+          <div class="brand-name">AI面试模拟</div>
+          <div class="brand-sub">AI 面试训练</div>
+        </template>
       </div>
       <el-menu
         :default-active="activeMenu"
+        :collapse="collapsed"
         router
         class="menu"
         background-color="#001529"
@@ -82,6 +87,15 @@ const activeMenu = computed(() => {
   padding: 24px 20px 16px;
   color: #fff;
   flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-toggle {
+  font-size: 18px;
+  line-height: 1;
+  user-select: none;
 }
 .brand-name {
   font-size: 22px;

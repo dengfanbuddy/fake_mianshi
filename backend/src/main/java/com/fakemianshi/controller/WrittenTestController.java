@@ -9,6 +9,7 @@ import com.fakemianshi.dto.WrittenTestSubmitResponse;
 import com.fakemianshi.service.WrittenTestService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.PreDestroy;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,6 +37,11 @@ public class WrittenTestController {
 
     /** 出题流式推送用线程池（长任务不阻塞 web 线程） */
     private final ExecutorService sseExecutor = Executors.newCachedThreadPool();
+
+    @PreDestroy
+    public void shutdown() {
+        sseExecutor.shutdownNow();
+    }
 
     /** 开始笔试：创建会话并生成题目 */
     @PostMapping("/start/{projectId}")

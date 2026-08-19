@@ -16,6 +16,10 @@ public interface PromptTemplateService {
         WRITTEN_QUESTION("笔试出题"),
         /** 模拟面试大纲 */
         MOCK_OUTLINE("模拟面试大纲"),
+        /** 简历分析 */
+        RESUME_ANALYSIS("简历分析"),
+        /** 面试官开场白 */
+        MOCK_OPENING("面试官开场白"),
         /** 笔试分析报告 */
         WRITTEN_ANALYSIS("笔试分析报告"),
         /** 模拟面试分析报告 */

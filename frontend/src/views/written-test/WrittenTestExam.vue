@@ -494,6 +494,29 @@ onBeforeUnmount(() => {
   width: 230px;
   flex-shrink: 0;
 }
+
+/* 窄屏适配：答题卡移到题目下方，纵向滚动 */
+@media (max-width: 768px) {
+  .exam-page {
+    height: auto;
+    min-height: 100vh;
+  }
+  .exam-body {
+    flex-direction: column;
+    overflow: visible;
+  }
+  .question-area {
+    order: 1;
+  }
+  .question-scroll {
+    height: auto;
+    max-height: 55vh;
+  }
+  .answer-card {
+    width: 100%;
+    order: 2;
+  }
+}
 .card {
   border-radius: 8px;
 }

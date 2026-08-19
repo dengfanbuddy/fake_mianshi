@@ -6,6 +6,7 @@ import com.fakemianshi.dto.LlmResponse;
 import com.fakemianshi.entity.Resume;
 import com.fakemianshi.repository.ResumeRepository;
 import com.fakemianshi.service.LlmService;
+import com.fakemianshi.service.PromptTemplateService;
 import com.fakemianshi.service.ResumeService;
 import com.fakemianshi.util.PdfUtil;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,7 @@ public class ResumeServiceImpl implements ResumeService {
 
     private final ResumeRepository resumeRepository;
     private final LlmService llmService;
+    private final PromptTemplateService promptTemplateService;
 
     /** 上传根目录，取自 app.upload-dir 配置 */
     @Value("${app.upload-dir:./uploads}")
@@ -88,19 +90,9 @@ public class ResumeServiceImpl implements ResumeService {
         Resume resume = Optional.ofNullable(resumeRepository.selectById(resumeId))
                 .orElseThrow(() -> new ResourceNotFoundException("简历不存在: id=" + resumeId));
 
-        String systemPrompt = """
-                你是一名资深的技术面试官。请分析候选人的简历内容，并严格以 JSON 格式输出结构化分析结果，不要输出任何额外文字或 Markdown 代码块。
-                输出 JSON 字段如下：
-                {
-                  "experienceYears": 工作经验年数（数字）,
-                  "currentPosition": 当前职位（字符串）,
-                  "techStack": 技术栈（字符串数组）,
-                  "projects": 项目经验描述（字符串数组）,
-                  "education": 教育背景（字符串）,
-                  "suggestedPosition": 建议应聘的岗位（字符串）,
-                  "suggestedSeniority": 建议职级（如 初级/中级/高级，字符串）
-                }
-                """;
+        // 简历分析走提示词模板体系（可自定义）；分析阶段岗位未知，用默认模板
+        String systemPrompt = promptTemplateService.getTemplate(null,
+                PromptTemplateService.Scene.RESUME_ANALYSIS.name(), "");
 
         LlmResponse response = llmService.chat(systemPrompt, resume.getParsedText());
         resume.setAnalysisResult(response.getContent());
