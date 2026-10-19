@@ -52,8 +52,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class ProjectControllerTest {
 
-    /** 服务器 context-path 为 /api */
-    private static final String BASE = ""; // MockMvc 不自动应用 context-path，路径不含 /api
+    /**
+     * API 前缀。
+     *
+     * <p>历史说明：过去后端用 {@code server.servlet.context-path=/api}，而 MockMvc 不会自动附加
+     * context-path，所以当时路径不含 /api。现在 {@code WebMvcConfig#configurePathMatch} 改为
+     * 在 MVC 映射层给所有 {@code @RestController} 补 /api 前缀，MockMvc 会参与该映射，
+     * 因此这里必须显式带上 /api。
+     */
+    private static final String BASE = "/api";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -122,6 +129,49 @@ class ProjectControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data[0].id").value(second))
                 .andExpect(jsonPath("$.data[1].id").value(first));
+    }
+
+    @Test
+    void page_shouldReturnPagedProjects() throws Exception {
+        // 测试库是跨运行复用的临时 SQLite 文件，total 用基线差值断言，避免依赖库里恰好为空
+        long before = projectRepository.countAll();
+        Long first = createProject("分页A");
+        Long second = createProject("分页B");
+        Long third = createProject("分页C");
+        int expectedTotal = (int) before + 3;
+
+        // 第 1 页：2 条，应为最新创建的两条
+        mockMvc.perform(get(BASE + "/project/page?page=1&size=2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(expectedTotal))
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.size").value(2))
+                .andExpect(jsonPath("$.data.totalPages").value((expectedTotal + 1) / 2))
+                .andExpect(jsonPath("$.data.records.length()").value(2))
+                .andExpect(jsonPath("$.data.records[0].id").value(third))
+                .andExpect(jsonPath("$.data.records[1].id").value(second));
+
+        // 第 2 页：剩余记录中的下一条即 first（更早创建的项目排在后面）
+        mockMvc.perform(get(BASE + "/project/page?page=2&size=2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page").value(2))
+                .andExpect(jsonPath("$.data.records[0].id").value(first));
+    }
+
+    /** size 归一化：传 0/负数按 1 处理，传超大值不超过上限（防止一次拉全表） */
+    @Test
+    void page_shouldNormalizeIllegalPageParams() throws Exception {
+        createProject("归一化A");
+
+        mockMvc.perform(get(BASE + "/project/page?page=0&size=0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.page").value(1))
+                .andExpect(jsonPath("$.data.size").value(1));
+
+        mockMvc.perform(get(BASE + "/project/page?page=1&size=100000"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.size").value(100));
     }
 
     @Test

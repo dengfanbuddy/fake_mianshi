@@ -21,4 +21,12 @@ public interface InterviewSessionRepository extends BaseMapper<InterviewSession>
     /** 查询某项目下指定类型且已完成状态的会话，按完成时间倒序（取第一条即最近一次） */
     @Select("SELECT * FROM interview_session WHERE project_id = #{projectId} AND type = #{type} AND status = #{status} ORDER BY completed_at DESC")
     List<InterviewSession> findByProjectIdAndTypeAndStatusOrderByCompletedAtDesc(Long projectId, String type, String status);
+
+    /** 会话总数（看板统计用 COUNT，避免全表读入内存） */
+    @Select("SELECT COUNT(*) FROM interview_session")
+    long countAll();
+
+    /** 指定类型的会话数 */
+    @Select("SELECT COUNT(*) FROM interview_session WHERE type = #{type}")
+    long countByType(String type);
 }

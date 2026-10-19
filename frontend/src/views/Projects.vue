@@ -1,13 +1,16 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { getProjects, createProject } from '../api/project'
+import { getProjectsPage, createProject } from '../api/project'
 
 const router = useRouter()
 
 const projects = ref([])
 const loading = ref(false)
+// 分页：项目数增长后不再一次性拉全量
+const page = ref(1)
+const size = ref(12)
+const total = ref(0)
 
 // 新建项目弹窗
 const dialogVisible = ref(false)
@@ -17,9 +20,15 @@ const form = ref({ name: '', targetPosition: '', description: '' })
 async function fetchProjects() {
   loading.value = true
   try {
-    const res = await getProjects()
+    const res = await getProjectsPage(page.value, size.value)
     if (res.code === 200) {
-      projects.value = res.data || []
+      projects.value = res.data?.records || []
+      total.value = res.data?.total || 0
+      // 删除/新建后当前页可能越界，回落到最后一页
+      if (!projects.value.length && total.value > 0 && page.value > 1) {
+        page.value = Math.max(1, Math.ceil(total.value / size.value))
+        await fetchProjects()
+      }
     } else {
       ElMessage.error(res.message || '加载项目列表失败')
     }
@@ -28,6 +37,11 @@ async function fetchProjects() {
   } finally {
     loading.value = false
   }
+}
+
+function handlePageChange(p) {
+  page.value = p
+  fetchProjects()
 }
 
 function openCreate() {
@@ -115,6 +129,17 @@ onMounted(fetchProjects)
       </el-row>
     </div>
 
+    <div v-if="total > size" class="pager">
+      <el-pagination
+        layout="prev, pager, next, total"
+        :current-page="page"
+        :page-size="size"
+        :total="total"
+        background
+        @current-change="handlePageChange"
+      />
+    </div>
+
     <el-dialog v-model="dialogVisible" title="新建项目" width="480px">
       <el-form label-width="80px">
         <el-form-item label="项目名称" required>
@@ -196,5 +221,10 @@ onMounted(fetchProjects)
 .card-actions {
   display: flex;
   justify-content: flex-end;
+}
+.pager {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
 }
 </style>

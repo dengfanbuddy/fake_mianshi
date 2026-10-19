@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -33,6 +34,14 @@ public class ProjectController {
     @GetMapping
     public ApiResponse<List<InterviewProject>> list() {
         return ApiResponse.success(projectService.findAll());
+    }
+
+    /** 项目列表分页（按创建时间倒序）：项目数增长后前端不再一次性渲染全部 */
+    @GetMapping("/page")
+    public ApiResponse<com.fakemianshi.dto.PageResult<InterviewProject>> page(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success(projectService.findPage(page, size));
     }
 
     /** 项目详情 */

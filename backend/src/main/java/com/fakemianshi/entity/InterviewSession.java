@@ -39,6 +39,16 @@ public class InterviewSession {
     @TableField("completed_at")
     private LocalDateTime completedAt;
 
+    /**
+     * 本次模拟面试的大纲（JSON，仅 MOCK 会话使用）。
+     * 持久化而非放内存：重启后仍用同一份大纲追问，避免面试中途"换题单"。
+     */
+    private String outline;
+
+    /** 是否引用最近一次笔试结果（来自 start 请求，仅 MOCK 会话使用） */
+    @TableField("reference_written_test")
+    private Boolean referenceWrittenTest;
+
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 

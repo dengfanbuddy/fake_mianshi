@@ -29,6 +29,12 @@ public class DatabaseMigration {
         try (Connection conn = dataSource.getConnection()) {
             ensureColumn(conn, "interview_project", "target_position", "VARCHAR(200)");
 
+            // interview_session：模拟面试大纲与「是否引用笔试结果」原先只存内存缓存，
+            // 重启后大纲会重新生成（面试中途换题单），且缓存随会话数无界增长。
+            // 改为落库后，旧库需要补这两列。
+            ensureColumn(conn, "interview_session", "outline", "TEXT");
+            ensureColumn(conn, "interview_session", "reference_written_test", "BOOLEAN");
+
             // session_analysis 后续新增列（旧库升级补齐）
             ensureColumn(conn, "session_analysis", "overall_level", "VARCHAR(200)");
             ensureColumn(conn, "session_analysis", "expected_salary_range", "VARCHAR(100)");

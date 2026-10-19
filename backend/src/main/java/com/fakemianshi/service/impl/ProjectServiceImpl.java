@@ -2,6 +2,7 @@ package com.fakemianshi.service.impl;
 
 import com.fakemianshi.config.BusinessException;
 import com.fakemianshi.config.ResourceNotFoundException;
+import com.fakemianshi.dto.PageResult;
 import com.fakemianshi.entity.InterviewProject;
 import com.fakemianshi.entity.InterviewSession;
 import com.fakemianshi.entity.Resume;
@@ -31,6 +32,9 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
 
+    /** 分页最大条数：防止前端传超大 size 一次性拉全表 */
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final InterviewProjectRepository projectRepository;
     private final ResumeRepository resumeRepository;
     private final InterviewSessionRepository sessionRepository;
@@ -43,6 +47,15 @@ public class ProjectServiceImpl implements ProjectService {
     @Transactional(readOnly = true)
     public List<InterviewProject> findAll() {
         return projectRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<InterviewProject> findPage(int page, int size) {
+        int safePage = PageResult.normalizePage(page);
+        int safeSize = PageResult.normalizeSize(size, MAX_PAGE_SIZE);
+        List<InterviewProject> records = projectRepository.findPage(safeSize, (safePage - 1) * safeSize);
+        return PageResult.of(records, projectRepository.countAll(), safePage, safeSize);
     }
 
     @Override

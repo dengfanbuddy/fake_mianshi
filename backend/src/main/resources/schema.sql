@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS interview_session (
     time_limit             INTEGER,
     started_at             TIMESTAMP,
     completed_at           TIMESTAMP,
+    outline                TEXT,
+    reference_written_test BOOLEAN,
     created_at             TIMESTAMP NOT NULL
 );
 
@@ -175,3 +177,20 @@ CREATE TABLE IF NOT EXISTS prompt_template (
     updated_at TIMESTAMP NOT NULL,
     UNIQUE(occupation, scene)
 );
+
+-- ============ 索引 ============
+-- 所有查询都是按 session_id / project_id 过滤 + 按时间排序；原先这些表全部没有索引，
+-- 每个请求都是全表扫。CREATE INDEX IF NOT EXISTS 幂等，旧库下次启动自动补齐
+-- （spring.sql.init.mode=always，schema.sql 每次启动都会执行）。
+CREATE INDEX IF NOT EXISTS idx_session_project       ON interview_session(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_project_type  ON interview_session(project_id, type, status, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_message_session       ON mock_interview_message(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_question_session      ON written_test_question(session_id, order_num);
+CREATE INDEX IF NOT EXISTS idx_answer_session        ON written_test_answer(session_id);
+CREATE INDEX IF NOT EXISTS idx_answer_question       ON written_test_answer(question_id);
+CREATE INDEX IF NOT EXISTS idx_session_analysis      ON session_analysis(session_id);
+CREATE INDEX IF NOT EXISTS idx_question_analysis     ON question_analysis(session_id);
+CREATE INDEX IF NOT EXISTS idx_weakness_project      ON weakness_tag(project_id);
+CREATE INDEX IF NOT EXISTS idx_resume_project        ON resume(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_position_project      ON position_requirement(project_id);
+CREATE INDEX IF NOT EXISTS idx_history_project       ON historical_analysis(project_id, generated_at DESC);

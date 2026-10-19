@@ -1,5 +1,6 @@
 package com.fakemianshi.service;
 
+import com.fakemianshi.dto.PageResult;
 import com.fakemianshi.entity.InterviewProject;
 
 import java.util.List;
@@ -11,6 +12,9 @@ public interface ProjectService {
 
     /** 查询全部项目，按创建时间倒序 */
     List<InterviewProject> findAll();
+
+    /** 分页查询项目（按创建时间倒序），page 从 1 开始 */
+    PageResult<InterviewProject> findPage(int page, int size);
 
     /** 按 id 查询，不存在抛 ResourceNotFoundException */
     InterviewProject findById(Long id);

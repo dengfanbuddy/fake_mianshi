@@ -182,6 +182,63 @@ class MockInterviewServiceTest {
         assertEquals("技术深挖型", response.getPersonaName());
     }
 
+    // ---------- 大纲持久化（原先只放内存缓存，重启即丢且无界增长） ----------
+
+    @Test
+    void start_shouldPersistOutlineAndReferenceFlagOnSession() {
+        MockInterviewStartRequest req = new MockInterviewStartRequest();
+        req.setPersonaId(1L);
+        req.setReferenceWrittenTest(true);
+
+        service.start(1L, req);
+
+        InterviewSession session = sessions.get(1L);
+        assertEquals("{\"sections\":[{\"type\":\"TECHNICAL\",\"topics\":[\"JVM\"]}],\"estimatedQuestions\":10}",
+                session.getOutline());
+        assertEquals(Boolean.TRUE, session.getReferenceWrittenTest());
+    }
+
+    /** 已落库的大纲要复用：同一会话不重复生成（重启后也不会"换题单"） */
+    @Test
+    void respond_shouldReusePersistedOutline_withoutRegenerating() {
+        service.start(1L, new MockInterviewStartRequest());
+        org.mockito.Mockito.clearInvocations(questionGenerationService);
+
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答内容");
+        service.respond(1L, req);
+
+        verify(questionGenerationService, org.mockito.Mockito.never())
+                .generateMockInterviewOutline(anyLong());
+    }
+
+    /** 升级前的老会话（outline 为空）：生成一次并回写，避免每次调用都重新生成 */
+    @Test
+    void respond_shouldGenerateAndPersistOutline_whenSessionHasNoOutline() {
+        InterviewSession legacy = new InterviewSession();
+        legacy.setId(7L);
+        legacy.setProjectId(1L);
+        legacy.setType("MOCK");
+        legacy.setStatus("IN_PROGRESS");
+        sessions.put(7L, legacy);
+
+        MockInterviewMessage opening = new MockInterviewMessage();
+        opening.setId(1L);
+        opening.setSessionId(7L);
+        opening.setRole("INTERVIEWER");
+        opening.setPersonaId(1L);
+        opening.setContent("你好，我们开始吧。");
+        messages.add(opening);
+
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答内容");
+        service.respond(7L, req);
+
+        assertEquals("{\"sections\":[{\"type\":\"TECHNICAL\",\"topics\":[\"JVM\"]}],\"estimatedQuestions\":10}",
+                legacy.getOutline());
+        verify(questionGenerationService).generateMockInterviewOutline(1L);
+    }
+
     // ---------- respond ----------
 
     @Test

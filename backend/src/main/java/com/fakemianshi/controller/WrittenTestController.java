@@ -20,7 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 笔试接口。
@@ -35,8 +35,9 @@ public class WrittenTestController {
 
     private final WrittenTestService writtenTestService;
 
-    /** 出题流式推送用线程池（长任务不阻塞 web 线程） */
-    private final ExecutorService sseExecutor = Executors.newCachedThreadPool();
+    /** 出题流式推送用线程池（长任务不阻塞 web 线程；有界，避免并发重试把线程数打爆） */
+    private final ExecutorService sseExecutor =
+            com.fakemianshi.config.AppExecutors.bounded("written-sse", 4, 8);
 
     @PreDestroy
     public void shutdown() {
@@ -61,25 +62,41 @@ public class WrittenTestController {
         // 禁用缓存：避免浏览器/代理缓存 SSE 响应导致重复回放
         response.setHeader("Cache-Control", "no-cache, no-transform");
         SseEmitter emitter = new SseEmitter(300_000L);
-        sseExecutor.execute(() -> {
-            try {
-                WrittenTestStartResponse res = writtenTestService.streamStart(projectId, req,
-                        delta -> sendOrThrow(emitter, "delta", delta),
-                        reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
-                emitter.send(SseEmitter.event().name("done").data(res));
-                emitter.complete();
-            } catch (Exception e) {
-                log.warn("流式出题失败: {}", e.getMessage());
+        try {
+            sseExecutor.execute(() -> {
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(
-                            "AI 出题失败：" + (e.getMessage() == null ? "未知错误" : e.getMessage())));
-                } catch (IOException ignored) {
-                    // 客户端已断开
+                    WrittenTestStartResponse res = writtenTestService.streamStart(projectId, req,
+                            delta -> sendOrThrow(emitter, "delta", delta),
+                            reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
+                    emitter.send(SseEmitter.event().name("done").data(res));
+                    emitter.complete();
+                } catch (Exception e) {
+                    log.warn("流式出题失败: {}", e.getMessage());
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(
+                                "AI 出题失败：" + (e.getMessage() == null ? "未知错误" : e.getMessage())));
+                    } catch (IOException ignored) {
+                        // 客户端已断开
+                    }
+                    emitter.complete();
                 }
-                emitter.complete();
-            }
-        });
+            });
+        } catch (RejectedExecutionException e) {
+            // 线程池有界：并发出题任务占满时明确告知，而不是无限建线程把服务拖垮
+            log.warn("出题任务并发已满，拒绝新请求: projectId={}", projectId);
+            emitError(emitter, "当前出题任务较多，请稍后重试");
+        }
         return emitter;
+    }
+
+    /** 推送一条错误事件并结束 SSE（客户端已断开时静默忽略） */
+    private void emitError(SseEmitter emitter, String message) {
+        try {
+            emitter.send(SseEmitter.event().name("error").data(message));
+        } catch (IOException ignored) {
+            // 客户端已断开
+        }
+        emitter.complete();
     }
 
     /** SSE 推送工具：客户端断开时以 RuntimeException 中断生成任务 */

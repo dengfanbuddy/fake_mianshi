@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * 面试会话接口（列表查询）。
  *
- * <p>注意：服务器 context-path 为 /api，因此这里的 /session 实际暴露为 /api/session。
+ * <p>接口统一暴露为 /api/session（/api 前缀由 WebMvcConfig 统一补充）。
  */
 @RestController
 @RequestMapping("/session")
@@ -54,13 +54,11 @@ public class SessionController {
     /** 看板统计：项目数、会话数（笔试/面试） */
     @GetMapping("/stats")
     public ApiResponse<Map<String, Object>> stats() {
-        List<InterviewSession> all = sessionRepository.selectList(null);
-        long written = all.stream().filter(s -> "WRITTEN".equals(s.getType())).count();
-        long mock = all.stream().filter(s -> "MOCK".equals(s.getType())).count();
+        // 用 COUNT 聚合，不再把所有会话读进内存再 filter（会话数越多越慢）
         return ApiResponse.success(Map.of(
-                "projectCount", projectRepository.selectCount(null),
-                "sessionCount", all.size(),
-                "writtenCount", written,
-                "mockCount", mock));
+                "projectCount", projectRepository.countAll(),
+                "sessionCount", sessionRepository.countAll(),
+                "writtenCount", sessionRepository.countByType("WRITTEN"),
+                "mockCount", sessionRepository.countByType("MOCK")));
     }
 }

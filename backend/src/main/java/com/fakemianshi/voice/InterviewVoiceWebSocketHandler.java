@@ -28,7 +28,6 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * 面试语音流式 WebSocket 端点（Phase B）。
@@ -56,7 +55,9 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
-    private final ExecutorService replyExecutor = Executors.newCachedThreadPool();
+    /** 语音回复线程池（有界：一个回复任务要等 LLM 流式 + 逐句 TTS，可能占用线程数十秒） */
+    private final ExecutorService replyExecutor =
+            com.fakemianshi.config.AppExecutors.bounded("voice-reply", 4, 16);
 
     /** 每个浏览器 WebSocket 会话的流式状态 */
     private static final class SessionState {
@@ -198,32 +199,41 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
         // 立即把识别文本推给前端展示（不等待 LLM 回复）
         sendJson(session, "user_text", Map.of("text", candidateText, "audioPath", audioPath == null ? "" : audioPath));
 
-        replyExecutor.execute(() -> {
-            MockInterviewRespondRequest req = new MockInterviewRespondRequest();
-            req.setUserText(candidateText);
-            req.setAudioPath(audioPath);
-            mockInterviewService.streamInterviewReply(sessionId, req, new StreamEventSink() {
-                @Override
-                public void onTextDelta(String delta) {
-                    sendJson(session, "text", Map.of("delta", delta == null ? "" : delta));
-                }
+        try {
+            replyExecutor.execute(() -> {
+                MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+                req.setUserText(candidateText);
+                req.setAudioPath(audioPath);
+                mockInterviewService.streamInterviewReply(sessionId, req, new StreamEventSink() {
+                    @Override
+                    public void onTextDelta(String delta) {
+                        sendJson(session, "text", Map.of("delta", delta == null ? "" : delta));
+                    }
 
-                @Override
-                public void onAudio(byte[] pcmChunk) {
-                    sendBinary(session, pcmChunk);
-                }
+                    @Override
+                    public void onAudio(byte[] pcmChunk) {
+                        sendBinary(session, pcmChunk);
+                    }
 
-                @Override
-                public void onDone(MockInterviewRespondResponse response) {
-                    sendJson(session, "done", response);
-                }
+                    @Override
+                    public void onDone(MockInterviewRespondResponse response) {
+                        sendJson(session, "done", response);
+                    }
 
-                @Override
-                public void onError(String message) {
-                    sendError(session, message);
-                }
+                    @Override
+                    public void onError(String message) {
+                        sendError(session, message);
+                    }
+                });
             });
-        });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            // 线程池有界：回复任务排队已满时明确回错误，并复位标记以便用户重试
+            log.warn("语音回复任务队列已满，拒绝本次回复: sessionId={}", sessionId);
+            synchronized (state.lock) {
+                state.replyStarted = false;
+            }
+            sendError(session, "当前排队任务较多，请稍后重新提交");
+        }
     }
 
     private void sendJson(WebSocketSession session, String type, Object data) {

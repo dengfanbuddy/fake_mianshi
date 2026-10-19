@@ -38,8 +38,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -50,7 +48,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -106,12 +103,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     private final VoiceService voiceService;
     private final AudioStorageUtil audioStorageUtil;
 
-    /** 会话 -> 面试大纲（JSON），MVP 不持久化 */
-    private final ConcurrentHashMap<Long, String> outlineCache = new ConcurrentHashMap<>();
-
-    /** 会话 -> 是否引用笔试结果标记（来自 start 请求，MVP 不持久化） */
-    private final ConcurrentHashMap<Long, Boolean> referenceWrittenTestFlags = new ConcurrentHashMap<>();
-
     @Override
     public MockInterviewStartResponse start(Long projectId, MockInterviewStartRequest req) {
         // 1. 校验项目存在
@@ -140,12 +131,14 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         opening.setAudioPath(saveInterviewerAudio(openingMessage, session.getId(), persona));
         messageRepository.insert(opening);
 
-        // 5. 生成面试大纲（MVP 不持久化，缓存后放响应返回）
+        // 5. 生成面试大纲并随会话落库
+        // 曾用 ConcurrentHashMap 缓存：只在 concludeInterview 时清理，中途放弃的会话会永久驻留；
+        // 而且服务重启后缓存丢失会导致重新生成 —— 面试中途"换题单"。落库后两者都解决。
         String outline = questionGenerationService.generateMockInterviewOutline(projectId);
-        outlineCache.put(session.getId(), outline);
-
         boolean referenceWrittenTest = req != null && Boolean.TRUE.equals(req.getReferenceWrittenTest());
-        referenceWrittenTestFlags.put(session.getId(), referenceWrittenTest);
+        session.setOutline(outline);
+        session.setReferenceWrittenTest(referenceWrittenTest);
+        sessionRepository.updateById(session);
 
         // 6. 组装响应
         MockInterviewStartResponse response = new MockInterviewStartResponse();
@@ -163,7 +156,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         requireUserText(req);
 
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
-        String outline = getOutline(sessionId, session.getProjectId());
+        String outline = getOutline(session);
         // 候选人消息先不落库，作为最后一条 user 消息拼进上下文；LLM 调用期间不持有 SQLite 写锁
         List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
 
@@ -183,7 +176,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         requireUserText(req);
 
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
-        String outline = getOutline(sessionId, session.getProjectId());
+        String outline = getOutline(session);
         List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
 
         String fullReply = llmService.chatStream(messages, LlmServiceImpl.DEFAULT_MAX_TOKENS, onDelta, onReasoning);
@@ -198,7 +191,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
             requireUserText(req);
 
             InterviewerPersona persona = resolveCurrentPersona(sessionId);
-            String outline = getOutline(sessionId, session.getProjectId());
+            String outline = getOutline(session);
             // 候选人消息先不落库，作为最后一条 user 消息拼进上下文；LLM/TTS 期间不持有 SQLite 写锁
             List<LlmService.Message> messages = buildMessages(session, persona, outline, req.getUserText());
             String styleConfig = persona == null ? null : persona.getStyleConfig();
@@ -296,9 +289,29 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         if (text == null || text.isBlank() || sink == null) {
             return;
         }
+        final String sentence = text.trim();
+        // 本地 Qwen 走流式：首包约 0.5s 即可开始播放，不必等整句合成完；
+        // 一个分片都没推出去就失败时回退整句合成。腾讯云维持既有整句合成行为。
+        if (voiceService.preferStreamingTts()) {
+            java.util.concurrent.atomic.AtomicBoolean pushed =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            try {
+                voiceService.synthesizeSpeechStream(sentence, styleConfig, chunk -> {
+                    pushed.set(true);
+                    sink.onAudio(chunk);
+                });
+                return;
+            } catch (Exception e) {
+                if (pushed.get()) {
+                    log.warn("流式 TTS 中断，已播放部分保留: {}", e.getMessage());
+                    return;
+                }
+                log.warn("流式 TTS 不可用，回退整句合成: {}", e.getMessage());
+            }
+        }
         try {
-            // 用基础合成（TextToVoice，音色可控、稳定）逐句合成 wav，再拆成 PCM 分片推送
-            byte[] wav = voiceService.synthesizeSpeech(text, styleConfig);
+            // 整句合成（基础合成，音色可控、稳定），拿到 wav 后拆成 PCM 分片推送
+            byte[] wav = voiceService.synthesizeSpeech(sentence, styleConfig);
             WavAudio.PcmInfo info = WavAudio.parse(wav);
             if (info == null || info.pcm().length == 0) {
                 return;
@@ -448,7 +461,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         InterviewSession session = requireActiveSession(sessionId);
 
         InterviewerPersona persona = resolveCurrentPersona(sessionId);
-        String outline = getOutline(sessionId, session.getProjectId());
+        String outline = getOutline(session);
 
         // 2. 构造收尾 prompt：system 同上，最后追加一条 user 消息要求总结
         String userPrompt = "请总结本次面试，给出候选人的整体表现评价和后续建议，然后宣布面试结束。";
@@ -469,10 +482,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
         session.setStatus(STATUS_COMPLETED);
         session.setCompletedAt(LocalDateTime.now());
         sessionRepository.updateById(session);
-
-        // 清理会话级内存缓存，避免无界增长
-        outlineCache.remove(sessionId);
-        referenceWrittenTestFlags.remove(sessionId);
 
         // 自动触发会话分析（异步执行，不阻断收尾响应）
         analysisService.triggerAnalyze(sessionId);
@@ -502,30 +511,6 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     // ---------------- 内部方法 ----------------
-
-    /**
-     * 在事务提交后自动触发会话分析：保证分析能读取本次收尾前保存的全部对话消息。
-     * 分析失败只记录日志，不阻断面试收尾；当前无活动事务（如单元测试）时直接调用。
-     */
-    private void triggerAnalysisAfterCommit(Long sessionId) {
-        Runnable task = () -> {
-            try {
-                analysisService.analyzeSession(sessionId);
-            } catch (Exception e) {
-                log.warn("模拟面试会话分析自动触发失败: sessionId={}, cause={}", sessionId, e.getMessage());
-            }
-        };
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    task.run();
-                }
-            });
-        } else {
-            task.run();
-        }
-    }
 
     /**
      * 组装发给 LLM 的完整消息列表：system 首条 + 会话历史（CANDIDATE→user，INTERVIEWER→assistant），
@@ -705,7 +690,7 @@ public class MockInterviewServiceImpl implements MockInterviewService {
                         session.getProjectId(), TYPE_WRITTEN, STATUS_COMPLETED);
 
         // 仅当用户勾选「引用笔试结果」时才引入最近笔试错误题；未勾选则不引用
-        boolean include = Boolean.TRUE.equals(referenceWrittenTestFlags.get(session.getId()));
+        boolean include = Boolean.TRUE.equals(session.getReferenceWrittenTest());
         if (!include || writtenSessions.isEmpty()) {
             return null;
         }
@@ -762,11 +747,18 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     /**
-     * 取会话大纲：优先走内存缓存，缺省时重新调用出题引擎生成（如服务重启后）。
+     * 取会话大纲：优先用会话上已落库的大纲；为空说明是升级前的老会话，生成一次并回写，
+     * 避免同一会话每次调用都重新生成（原来放内存缓存，重启即丢）。
      */
-    private String getOutline(Long sessionId, Long projectId) {
-        return outlineCache.computeIfAbsent(sessionId,
-                id -> questionGenerationService.generateMockInterviewOutline(projectId));
+    private String getOutline(InterviewSession session) {
+        String outline = session.getOutline();
+        if (outline != null && !outline.isBlank()) {
+            return outline;
+        }
+        String generated = questionGenerationService.generateMockInterviewOutline(session.getProjectId());
+        session.setOutline(generated);
+        sessionRepository.updateById(session);
+        return generated;
     }
 
     /**
