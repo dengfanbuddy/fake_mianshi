@@ -417,27 +417,25 @@ async function handleDeletePersona(row) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   fetchConfigs()
   fetchPersonas()
-  fetchVoiceConfig()
   fetchVoiceStatus()
-  fetchLocalProcess().then(() => {
-    // 本地供应商时顺带探一次连通性，页面一进来就能看到"未运行/加载中/就绪"
-    if (voiceProvider.value !== 'local_qwen') {
-      return
-    }
-    fetchLocalHealth()
-      .then(() => {
-        const health = localHealth.value || {}
-        // 后端已托管但模型还没加载完：开个短轮询，让标签自己变成"已加载"，
-        // 而不是停在进页面那一刻的旧快照
-        if (localProcess.value?.managed && !(health.reachable && health.loaded)) {
-          startLocalPolling()
-        }
-      })
-      .catch(() => null)
-  })
+  // 必须等语音配置回来再判断供应商：它决定下面要不要探本地服务
+  await fetchVoiceConfig().catch(() => null)
+  await fetchLocalProcess()
+  const managed = Boolean(localProcess.value?.managed)
+  // 已托管说明后端确实在跑本地 sidecar，即使供应商读出来还是旧值也要探
+  if (voiceProvider.value !== 'local_qwen' && !managed) {
+    return
+  }
+  await fetchLocalHealth().catch(() => null)
+  const health = localHealth.value || {}
+  // 后端已托管但模型还没加载完：开个短轮询，让标签自己变成"已加载"，
+  // 而不是停在进页面那一刻的旧快照
+  if (managed && !(health.reachable && health.loaded)) {
+    startLocalPolling()
+  }
 })
 
 onBeforeUnmount(() => {
