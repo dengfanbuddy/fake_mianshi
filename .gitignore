@@ -6,6 +6,7 @@ dist-build-check/
 dist-verify/
 target/
 *.log
+release/
 
 # ---------- 运行时数据（含敏感信息，严禁提交） ----------
 uploads/

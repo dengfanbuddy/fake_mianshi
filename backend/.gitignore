@@ -1,6 +1,8 @@
 HELP.md
 target/
 .mvn/wrapper/maven-wrapper.jar
+# 前端构建产物（由 frontend/dist 拷贝而来，随源码分发而非 git 托管）
+src/main/resources/static/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
