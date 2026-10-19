@@ -1,7 +1,5 @@
 server:
   port: 8080
-  servlet:
-    context-path: /api
 
 spring:
   datasource:
@@ -29,6 +27,17 @@ mybatis-plus:
 app:
   upload-dir: ./uploads
   audio-dir: ./uploads/audio
+  # 语音供应商：tencent（腾讯云 API）或 local_qwen（本地 voice-service sidecar）
+  voice:
+    provider: ${VOICE_PROVIDER:tencent}
+    local:
+      base-url: ${QWEN_VOICE_URL:http://127.0.0.1:9100}
+      connect-timeout-seconds: 5
+      # 首次调用可能触发模型加载（数十秒），故放宽
+      timeout-seconds: 120
+      sample-rate: 16000
+      # 本地合成失败是否自动回退腾讯云（腾讯云密钥可用时）
+      fallback-to-tencent: true
 
 tencent:
   cloud:

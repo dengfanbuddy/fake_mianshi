@@ -51,7 +51,7 @@ class MockInterviewControllerTest {
         when(mockInterviewService.start(eq(1L), any(MockInterviewStartRequest.class)))
                 .thenReturn(startResponse());
 
-        mockMvc.perform(post("/mock-interview/start/{projectId}", 1L)
+        mockMvc.perform(post("/api/mock-interview/start/{projectId}", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"personaId\":1,\"referenceWrittenTest\":true}"))
                 .andExpect(status().isOk())
@@ -68,7 +68,7 @@ class MockInterviewControllerTest {
         when(mockInterviewService.start(eq(1L), any(MockInterviewStartRequest.class)))
                 .thenReturn(startResponse());
 
-        mockMvc.perform(post("/mock-interview/start/{projectId}", 1L))
+        mockMvc.perform(post("/api/mock-interview/start/{projectId}", 1L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
     }
@@ -80,7 +80,7 @@ class MockInterviewControllerTest {
         when(mockInterviewService.respond(eq(1L), any(MockInterviewRespondRequest.class)))
                 .thenReturn(respondResponse());
 
-        mockMvc.perform(post("/mock-interview/respond/{sessionId}", 1L)
+        mockMvc.perform(post("/api/mock-interview/respond/{sessionId}", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userText\":\"我的回答\",\"audioPath\":\"/uploads/audio/1.wav\"}"))
                 .andExpect(status().isOk())
@@ -98,7 +98,7 @@ class MockInterviewControllerTest {
         MockInterviewMessage summary = message(5L, "INTERVIEWER", "【面试结束】整体表现不错，建议加强并发实践。", 1L);
         when(mockInterviewService.concludeInterview(1L)).thenReturn(summary);
 
-        mockMvc.perform(post("/mock-interview/conclude/{sessionId}", 1L))
+        mockMvc.perform(post("/api/mock-interview/conclude/{sessionId}", 1L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.role").value("INTERVIEWER"))
@@ -113,7 +113,7 @@ class MockInterviewControllerTest {
         when(mockInterviewService.getMessages(1L))
                 .thenReturn(List.of(message(1L, "INTERVIEWER", "你好，我们开始吧。", 1L)));
 
-        mockMvc.perform(get("/mock-interview/messages/{sessionId}", 1L))
+        mockMvc.perform(get("/api/mock-interview/messages/{sessionId}", 1L))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.length()").value(1))
@@ -125,7 +125,7 @@ class MockInterviewControllerTest {
 
     @Test
     void switchPersona_shouldAcceptBodyAndReturnVoid() throws Exception {
-        mockMvc.perform(put("/mock-interview/switch-persona/{sessionId}", 1L)
+        mockMvc.perform(put("/api/mock-interview/switch-persona/{sessionId}", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"newPersonaId\":2}"))
                 .andExpect(status().isOk())

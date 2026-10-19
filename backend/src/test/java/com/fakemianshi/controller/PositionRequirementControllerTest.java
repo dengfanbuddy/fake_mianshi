@@ -31,8 +31,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class PositionRequirementControllerTest {
 
-    /** 服务器 context-path 为 /api */
-    private static final String BASE = ""; // MockMvc 不自动应用 context-path，路径不含 /api
+    /**
+     * API 前缀：{@code WebMvcConfig#configurePathMatch} 在 MVC 映射层给所有
+     * {@code @RestController} 补 /api 前缀，MockMvc 会参与该映射，故路径必须含 /api。
+     */
+    private static final String BASE = "/api";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 

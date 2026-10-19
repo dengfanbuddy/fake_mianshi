@@ -42,7 +42,7 @@ class PersonaControllerTest {
 
     @Test
     void list_shouldContainPresets_whenSeeded() throws Exception {
-        mockMvc.perform(get("/persona"))
+        mockMvc.perform(get("/api/persona"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.length()").value(greaterThanOrEqualTo(5)))
@@ -51,7 +51,7 @@ class PersonaControllerTest {
 
     @Test
     void create_shouldCreateCustomStyle() throws Exception {
-        mockMvc.perform(post("/persona")
+        mockMvc.perform(post("/api/persona")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "自定义风格", "description": "我的自定义风格",
@@ -68,7 +68,7 @@ class PersonaControllerTest {
     void update_shouldModifyCustomStyle() throws Exception {
         Long id = createCustomPersona();
 
-        mockMvc.perform(put("/persona/{id}", id)
+        mockMvc.perform(put("/api/persona/{id}", id)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "改后风格", "description": "更新后的描述",
@@ -79,7 +79,7 @@ class PersonaControllerTest {
                 .andExpect(jsonPath("$.data.name").value("改后风格"))
                 .andExpect(jsonPath("$.data.description").value("更新后的描述"));
 
-        mockMvc.perform(get("/persona/{id}", id))
+        mockMvc.perform(get("/api/persona/{id}", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.name").value("改后风格"));
     }
@@ -88,11 +88,11 @@ class PersonaControllerTest {
     void delete_shouldRemoveCustomStyle() throws Exception {
         Long id = createCustomPersona();
 
-        mockMvc.perform(delete("/persona/{id}", id))
+        mockMvc.perform(delete("/api/persona/{id}", id))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
-        mockMvc.perform(get("/persona/{id}", id))
+        mockMvc.perform(get("/api/persona/{id}", id))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
     }
@@ -101,7 +101,7 @@ class PersonaControllerTest {
     void updatePreset_shouldBeRejected() throws Exception {
         Long presetId = firstPresetId();
 
-        mockMvc.perform(put("/persona/{id}", presetId)
+        mockMvc.perform(put("/api/persona/{id}", presetId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "篡改预设"}
@@ -115,7 +115,7 @@ class PersonaControllerTest {
     void deletePreset_shouldBeRejected() throws Exception {
         Long presetId = firstPresetId();
 
-        mockMvc.perform(delete("/persona/{id}", presetId))
+        mockMvc.perform(delete("/api/persona/{id}", presetId))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("预设风格不可删除"));
@@ -123,7 +123,7 @@ class PersonaControllerTest {
 
     @Test
     void create_withoutName_shouldBeRejected() throws Exception {
-        mockMvc.perform(post("/persona")
+        mockMvc.perform(post("/api/persona")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"description": "没有名字的风格"}
@@ -134,7 +134,7 @@ class PersonaControllerTest {
     }
 
     private Long createCustomPersona() throws Exception {
-        String resp = mockMvc.perform(post("/persona")
+        String resp = mockMvc.perform(post("/api/persona")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "临时风格", "description": "临时描述"}
