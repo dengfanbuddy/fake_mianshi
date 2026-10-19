@@ -50,6 +50,15 @@ public class VoiceConfig {
     @TableField("tts_url")
     private String ttsUrl;
 
+    /**
+     * 本地识别的领域热词（system prompt 偏置），页面可编辑。
+     *
+     * <p>为空表示使用 {@code app.voice.local.asr.prompt} 里的内置默认表
+     * （不加热词时 "JVM" 会被识别成 "JYEM"，所以默认值不是空）。
+     */
+    @TableField("asr_prompt")
+    private String asrPrompt;
+
     /** 是否启用 */
     @TableField("is_active")
     private Boolean isActive;

@@ -58,6 +58,9 @@ public class DatabaseMigration {
             ensureColumn(conn, "question_analysis", "example", "VARCHAR(3000)");
             ensureColumn(conn, "question_analysis", "improvement_suggestion", "VARCHAR(5000)");
 
+            // voice_config：识别热词改为页面可编辑（本地 ASR 的 system prompt 偏置）
+            ensureColumn(conn, "voice_config", "asr_prompt", "VARCHAR(2000)");
+
             log.info("数据库迁移检查完成");
         } catch (Exception e) {
             log.warn("数据库迁移失败（可忽略，后续启动会重试）: {}", e.getMessage());

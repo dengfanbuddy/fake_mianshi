@@ -43,8 +43,10 @@ app:
         enabled: ${VOICE_LOCAL_ASR_ENABLED:true}
         # 强制语种，留空表示让模型自动检测（会顺带返回 language 字段）
         language: ${VOICE_LOCAL_ASR_LANGUAGE:}
-        # 领域热词（system prompt 偏置）。本机实测：不给热词时 "JVM" 被识别成 "JYEM"，
-        # 给了热词后整句逐字一致。留空则完全依赖模型自身先验。
+        # 领域热词（system prompt 偏置）。本机实测：不给热词时 "JVM" 被识别成 "JYEM"、
+        # "gRPC" 成 "GRPC"、"etcd" 成 "ATCD"；给了对应写法后逐字一致。
+        # 注意大小写会照抄：写 ETCD 才能得到 ETCD，写 etcd 纠不过来。
+        # 页面「识别热词」可覆盖它（留空 = 用这里的默认值）。
         prompt: ${VOICE_LOCAL_ASR_PROMPT:术语：JVM、GC、Full GC、堆内存、垃圾回收、Redis、MySQL、Kubernetes、Spring、微服务、分布式、缓存、消息队列、幂等、熔断降级、索引、分库分表、线程池、事务、性能优化}
         timeout-seconds: 120
         # 中间结果刷新间隔（毫秒），0 = 关闭「边说边出字」，松手后才出文本

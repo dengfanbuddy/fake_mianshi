@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS voice_config (
     region     VARCHAR(50),
     asr_url    VARCHAR(300),
     tts_url    VARCHAR(300),
+    asr_prompt VARCHAR(2000),
     is_active  BOOLEAN,
     updated_at TIMESTAMP NOT NULL
 );

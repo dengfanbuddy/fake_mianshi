@@ -1,5 +1,6 @@
 package com.fakemianshi.service.impl;
 
+import com.fakemianshi.config.BusinessException;
 import com.fakemianshi.config.TencentCloudProperties;
 import com.fakemianshi.config.VoiceProperties;
 import com.fakemianshi.dto.VoiceConfigDTO;
@@ -27,6 +28,8 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
     private static final String PROVIDER_TENCENT = VoiceConfig.PROVIDER_TENCENT;
     private static final String DEFAULT_ASR_URL = "https://asr.tencentcloudapi.com";
     private static final String DEFAULT_TTS_URL = "https://tts.tencentcloudapi.com";
+    /** 识别热词长度上限（原因见 normalizeAsrPrompt） */
+    private static final int MAX_ASR_PROMPT_CHARS = 500;
 
     private final VoiceConfigRepository voiceConfigRepository;
     private final TencentCloudProperties properties;
@@ -63,10 +66,29 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
                     ? DEFAULT_TTS_URL : dto.getTtsUrl().trim());
         }
         cfg.setIsActive(true); // 保存的配置即激活
+        cfg.setAsrPrompt(normalizeAsrPrompt(dto.getAsrPrompt()));
         cfg.setUpdatedAt(LocalDateTime.now());
         voiceConfigRepository.insert(cfg);
-        log.info("语音配置已激活: provider={} ttsUrl={}", cfg.getProvider(), cfg.getTtsUrl());
+        log.info("语音配置已激活: provider={} ttsUrl={} asrPrompt={}", cfg.getProvider(), cfg.getTtsUrl(),
+                cfg.getAsrPrompt() == null ? "(内置默认)" : cfg.getAsrPrompt().length() + " 字");
         return cfg;
+    }
+
+    /**
+     * 归一化识别热词：空白视为"用内置默认"（存 null）；超长直接拒绝。
+     *
+     * <p>长度上限不是为了省 token，而是为了效果：热词表越长偏置越被稀释，实测会变差。
+     */
+    private String normalizeAsrPrompt(String input) {
+        if (input == null || input.isBlank()) {
+            return null;
+        }
+        String trimmed = input.trim();
+        if (trimmed.length() > MAX_ASR_PROMPT_CHARS) {
+            throw new BusinessException("识别热词过长（" + trimmed.length() + " 字，最多 "
+                    + MAX_ASR_PROMPT_CHARS + " 字）。热词越多偏置越被稀释，建议只填你岗位的高频术语。");
+        }
+        return trimmed;
     }
 
     /** 入参为空或为脱敏值（含 *）时返回原值，否则返回 trim 后的入参。 */
@@ -104,7 +126,25 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
         dto.setIsActive(cfg == null ? false : cfg.getIsActive());
         dto.setConfigured(cfg != null && cfg.isConfigured());
         dto.setLocal(cfg != null && cfg.isLocalProvider());
+        dto.setAsrPrompt(cfg == null ? null : cfg.getAsrPrompt());
+        dto.setAsrPromptDefault(defaultAsrPrompt());
         return dto;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public String effectiveAsrPrompt() {
+        VoiceConfig cfg = resolveActive();
+        if (cfg != null && cfg.getAsrPrompt() != null && !cfg.getAsrPrompt().isBlank()) {
+            return cfg.getAsrPrompt().trim();
+        }
+        return defaultAsrPrompt();
+    }
+
+    /** 配置文件/环境变量里的内置默认热词（页面留空时生效的值） */
+    private String defaultAsrPrompt() {
+        String prompt = voiceProperties.getLocal().getAsr().getPrompt();
+        return prompt == null || prompt.isBlank() ? "" : prompt.trim();
     }
 
     @Override

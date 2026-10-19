@@ -158,7 +158,8 @@ const localProcessTagType = computed(() => {
 /* ---------------- 腾讯云语音配置状态 ---------------- */
 const voiceConfigured = ref(null) // null=加载中, true/false
 const appIdConfigured = ref(false)
-const voiceForm = ref({ secretId: '', secretKey: '', appId: '' })
+const voiceForm = ref({ secretId: '', secretKey: '', appId: '', asrPrompt: '' })
+const asrPromptDefault = ref('') // 内置默认热词（后端下发，只读）
 const voiceMaskedId = ref('') // 已配置 SecretId 的脱敏回显（仅展示，不回传）
 const voiceSaving = ref(false)
 
@@ -191,10 +192,21 @@ async function fetchVoiceConfig() {
       voiceForm.value.secretId = ''
       voiceForm.value.secretKey = ''
       voiceForm.value.appId = res.data.appId || ''
+      voiceForm.value.asrPrompt = res.data.asrPrompt || ''
+      asrPromptDefault.value = res.data.asrPromptDefault || ''
     }
   } catch (e) {
     // 拦截器已提示
   }
+}
+
+// 把内置默认热词填进输入框（用户在此基础上改，比从零写好用）
+function fillDefaultAsrPrompt() {
+  if (!asrPromptDefault.value) {
+    ElMessage.info('后端未配置内置热词')
+    return
+  }
+  voiceForm.value.asrPrompt = asrPromptDefault.value
 }
 
 // 保存语音配置并激活（密钥留空保留原值）
@@ -212,17 +224,19 @@ async function saveVoiceConfigAction() {
       secretId: voiceForm.value.secretId.trim(),
       secretKey: voiceForm.value.secretKey.trim(),
       appId: voiceForm.value.appId.trim(),
+      asrPrompt: voiceForm.value.asrPrompt.trim(),
     })
     if (res.code === 200) {
       ElMessage.success(
         voiceProvider.value === 'local_qwen'
-          ? '已切换到本地 Qwen 语音合成，立即生效'
+          ? '已保存并激活：本地 Qwen 负责合成与识别，立即生效'
           : '语音配置已保存并激活，立即生效'
       )
       voiceMaskedId.value = res.data?.secretId || ''
       voiceForm.value.secretId = ''
       voiceForm.value.secretKey = ''
       voiceForm.value.appId = res.data?.appId || ''
+      voiceForm.value.asrPrompt = res.data?.asrPrompt || ''
       if (res.data?.ttsUrl && voiceProvider.value === 'local_qwen') {
         localVoiceUrl.value = res.data.ttsUrl
       }
@@ -530,6 +544,23 @@ onBeforeUnmount(() => {
             <el-button :loading="localTesting" style="margin-left: 12px" @click="testLocalVoice">
               测试连通
             </el-button>
+          </el-form-item>
+          <el-form-item label="识别热词">
+            <el-input
+              v-model="voiceForm.asrPrompt"
+              type="textarea"
+              :rows="3"
+              :placeholder="asrPromptDefault || '留空则使用内置热词表'"
+            />
+            <div class="hint">
+              本地识别会把这段文字作为提示偏置，减少同音错字。<strong>请按你希望“输出”的写法填写</strong>——
+              大小写会被照抄：实测 <code>etcd</code> 纠正不了、写成 <code>ETCD</code> 才能识别对；
+              不加时 <code>JVM</code> 会变成 <code>JYEM</code>、<code>gRPC</code> 会变成 <code>GRPC</code>。
+              <strong>留空表示使用内置默认表</strong>；建议只填岗位高频术语，列表太长反而稀释偏置。
+              <el-button link type="primary" size="small" @click="fillDefaultAsrPrompt">
+                填入内置默认
+              </el-button>
+            </div>
           </el-form-item>
           <el-alert
             v-if="localHealth"

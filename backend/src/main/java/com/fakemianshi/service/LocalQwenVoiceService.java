@@ -159,10 +159,26 @@ public class LocalQwenVoiceService implements VoiceService {
             url.append(sep).append("language=").append(urlEncode(asr.getLanguage().trim()));
             sep = '&';
         }
-        if (asr.getPrompt() != null && !asr.getPrompt().isBlank()) {
-            url.append(sep).append("prompt=").append(urlEncode(asr.getPrompt().trim()));
+        String prompt = effectiveAsrPrompt();
+        if (!prompt.isBlank()) {
+            url.append(sep).append("prompt=").append(urlEncode(prompt));
         }
         return url.toString();
+    }
+
+    /**
+     * 生效的识别热词：页面配置优先，其次配置文件/环境变量。
+     *
+     * <p>抽出来是为了可观测——识别不准时第一件事就是确认到底用了哪份热词。
+     */
+    public String effectiveAsrPrompt() {
+        if (voiceConfigService != null) {
+            // 服务内部已处理「页面为空 → 内置默认」的回退，这里直接用
+            String resolved = voiceConfigService.effectiveAsrPrompt();
+            return resolved == null ? "" : resolved.trim();
+        }
+        String fallback = properties.getLocal().getAsr().getPrompt();
+        return fallback == null ? "" : fallback.trim();
     }
 
     private static String urlEncode(String value) {

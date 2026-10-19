@@ -12,6 +12,10 @@ public class VoiceConfigDTO {
     private String region;
     private String asrUrl;
     private String ttsUrl;
+    /** 本地识别热词（页面可编辑；为空 = 用内置默认表） */
+    private String asrPrompt;
+    /** 内置默认热词表（只读下发，供页面做 placeholder / 一键填入） */
+    private String asrPromptDefault;
     private Boolean isActive;
     /** 是否已配置完整密钥（脱敏后的状态标识） */
     private Boolean configured;
@@ -80,6 +84,22 @@ public class VoiceConfigDTO {
 
     public void setTtsUrl(String ttsUrl) {
         this.ttsUrl = ttsUrl;
+    }
+
+    public String getAsrPrompt() {
+        return asrPrompt;
+    }
+
+    public void setAsrPrompt(String asrPrompt) {
+        this.asrPrompt = asrPrompt;
+    }
+
+    public String getAsrPromptDefault() {
+        return asrPromptDefault;
+    }
+
+    public void setAsrPromptDefault(String asrPromptDefault) {
+        this.asrPromptDefault = asrPromptDefault;
     }
 
     public Boolean getIsActive() {
