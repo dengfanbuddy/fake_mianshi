@@ -25,9 +25,10 @@ public interface ReviewService {
      *
      * @param projectId      项目 ID
      * @param status         过滤：null/空=全部，pending=待订正，corrected=已订正
-     * @param knowledgePoint 按知识点过滤（包含匹配，null/空=全部）
+     * @param knowledgePoint 按知识点名过滤（归一化匹配，null/空=全部）
+     * @param tagId          按弱点标签过滤（会连带该标签的全部同义写法；优先于 knowledgePoint）
      */
-    List<WrongQuestionItem> listWrongQuestions(Long projectId, String status, String knowledgePoint);
+    List<WrongQuestionItem> listWrongQuestions(Long projectId, String status, String knowledgePoint, Long tagId);
 
     /**
      * 重练一道错题并重新判分。

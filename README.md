@@ -129,6 +129,10 @@ build-release.cmd
 7. **再次面试** → 系统根据历史弱点标签（JVM、并发等）优先出题
 8. **历史综合分析** → 查看跨次面试的能力趋势与反复弱点
 
+> 弱点标签自动归并：LLM 每轮给知识点现起名字，同一个知识点会被写成十几种样子
+> （实测 69 条标签里 12 条都是 LongAdder）。系统会把同义写法合并成一条，
+> 原始写法保留在「N 种说法」里，见 [ADR-0011](docs/adr/0011-knowledge-point-normalization.md)。
+
 ## 目录结构
 
 ```
@@ -141,7 +145,7 @@ build-release.cmd
 │   │   ├── dto/          # 出入参（含统一分页 PageResult）
 │   │   ├── voice/        # 语音 WebSocket
 │   │   └── config/       # CORS、异常、种子数据、有界线程池
-│   └── src/test/         # 29 个测试类 · 206 个用例
+│   └── src/test/         # 31 个测试类 · 225 个用例
 ├── frontend/         # Vue3 前端
 │   ├── vite.config.js    # 含 Element Plus 按需引入插件配置
 │   └── src/

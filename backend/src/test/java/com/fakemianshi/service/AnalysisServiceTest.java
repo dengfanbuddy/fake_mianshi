@@ -90,7 +90,10 @@ class AnalysisServiceTest {
         service = new AnalysisServiceImpl(
                 sessionRepository, writtenTestQuestionRepository, writtenTestAnswerRepository,
                 mockInterviewMessageRepository, sessionAnalysisRepository, questionAnalysisRepository,
-                weaknessTagRepository, historicalAnalysisRepository, llmService,
+                weaknessTagRepository,
+                // 用真实实现：弱点标签的「同义归并 + 别名」就是被测行为，mock 掉等于没测
+                new com.fakemianshi.service.impl.WeaknessTagServiceImpl(weaknessTagRepository),
+                historicalAnalysisRepository, llmService,
                 promptTemplateService, interviewProjectRepository, passthroughTransactionTemplate());
 
         // 会话分析内存库

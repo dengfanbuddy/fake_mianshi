@@ -50,17 +50,33 @@ function goReview() {
 
     <div v-loading="loading" class="section-body">
       <div v-if="tags.length" class="weakness-list">
-        <div v-for="tag in tags" :key="tag.id" class="weakness-item">
-          <span class="weak-point">{{ tag.knowledgePoint }}</span>
-          <el-tag :type="masteryMeta(tag.masteryLevel).type" size="small" effect="dark">
-            {{ masteryMeta(tag.masteryLevel).label }}
-          </el-tag>
-          <el-badge
-            :value="tag.occurrenceCount"
-            :max="99"
-            class="occurrence-badge"
-          ><span class="occurrence-bg">出现次数</span></el-badge>
-        </div>
+        <el-tooltip
+          v-for="tag in tags"
+          :key="tag.id"
+          placement="top"
+          :disabled="!tag.aliasList?.length"
+        >
+          <template #content>
+            <div class="alias-tip">
+              <div class="alias-tip-title">同一个知识点的 {{ tag.aliasList.length + 1 }} 种写法：</div>
+              <div v-for="(alias, i) in tag.aliasList" :key="i">· {{ alias }}</div>
+            </div>
+          </template>
+          <div class="weakness-item">
+            <span class="weak-point">{{ tag.knowledgePoint }}</span>
+            <el-tag v-if="tag.aliasList?.length" size="small" type="info" effect="plain">
+              {{ tag.aliasList.length + 1 }} 种说法
+            </el-tag>
+            <el-tag :type="masteryMeta(tag.masteryLevel).type" size="small" effect="dark">
+              {{ masteryMeta(tag.masteryLevel).label }}
+            </el-tag>
+            <el-badge
+              :value="tag.occurrenceCount"
+              :max="99"
+              class="occurrence-badge"
+            ><span class="occurrence-bg">出现次数</span></el-badge>
+          </div>
+        </el-tooltip>
       </div>
       <el-empty v-else-if="!loading" description="暂无弱点标签，完成面试分析后生成" />
     </div>
@@ -103,5 +119,14 @@ function goReview() {
   display: inline-block;
   font-size: 12px;
   color: #909399;
+}
+.alias-tip {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 360px;
+}
+.alias-tip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 </style>

@@ -41,17 +41,19 @@ public class ReviewController {
      * 错题清单。
      *
      * @param status         all / pending / corrected
-     * @param knowledgePoint 按知识点过滤（包含匹配）
+     * @param knowledgePoint 按知识点名过滤（归一化匹配，兼容旧调用方）
+     * @param tagId          按弱点标签过滤（连带该标签的全部同义写法，优先于 knowledgePoint）
      */
     @GetMapping("/wrong-questions")
     public ApiResponse<List<WrongQuestionItem>> wrongQuestions(
             @RequestParam Long projectId,
             @RequestParam(required = false) String status,
-            @RequestParam(required = false) String knowledgePoint) {
+            @RequestParam(required = false) String knowledgePoint,
+            @RequestParam(required = false) Long tagId) {
         if (!ReviewServiceImpl.isValidStatus(status)) {
             throw new BusinessException("status 只能是 all / pending / corrected，收到: " + status);
         }
-        return ApiResponse.success(reviewService.listWrongQuestions(projectId, status, knowledgePoint));
+        return ApiResponse.success(reviewService.listWrongQuestions(projectId, status, knowledgePoint, tagId));
     }
 
     /** 重练一道错题并重新判分 */

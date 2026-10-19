@@ -142,6 +142,8 @@ CREATE TABLE IF NOT EXISTS weakness_tag (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id       BIGINT NOT NULL,
     knowledge_point  VARCHAR(200),
+    canonical_point  VARCHAR(200),
+    aliases          TEXT,
     mastery_level    VARCHAR(20),
     occurrence_count INTEGER,
     last_session_id  BIGINT,

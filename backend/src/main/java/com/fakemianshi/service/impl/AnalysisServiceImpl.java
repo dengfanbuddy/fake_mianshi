@@ -67,6 +67,9 @@ public class AnalysisServiceImpl implements AnalysisService {
     private static final String TYPE_WRITTEN = "WRITTEN";
     private static final String TYPE_MOCK = "MOCK";
 
+    /** 分析 prompt 里最多列出多少条已有知识点（再多会把 prompt 撑肥，收益也递减） */
+    private static final int EXISTING_POINTS_LIMIT = 60;
+
     /** 笔试分析 system prompt：偏客观，自动判分给错因，简答题给 LLM 评分 */
     private static final String WRITTEN_SYSTEM_PROMPT = """
             你是资深 Java 面试官。请分析以下笔试结果，为候选人生成一份查漏补缺的分析报告。
@@ -128,6 +131,7 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final SessionAnalysisRepository sessionAnalysisRepository;
     private final QuestionAnalysisRepository questionAnalysisRepository;
     private final WeaknessTagRepository weaknessTagRepository;
+    private final com.fakemianshi.service.WeaknessTagService weaknessTagService;
     private final HistoricalAnalysisRepository historicalAnalysisRepository;
     private final LlmService llmService;
     private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
@@ -231,26 +235,27 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
 
         String type = session.getType();
-        JsonNode analysisNode;
+        String systemPrompt;
+        String baseUserPrompt;
         if (TYPE_WRITTEN.equals(type)) {
-            String systemPrompt = promptTemplateService.getTemplate(
+            systemPrompt = promptTemplateService.getTemplate(
                     resolveOccupation(session.getProjectId()),
                     com.fakemianshi.service.PromptTemplateService.Scene.WRITTEN_ANALYSIS.name(),
                     resolvePosition(session.getProjectId()));
-            analysisNode = onDelta == null
-                    ? callLlm(systemPrompt, buildWrittenUserPrompt(sessionId))
-                    : callLlmStream(systemPrompt, buildWrittenUserPrompt(sessionId), onDelta, onReasoning);
+            baseUserPrompt = buildWrittenUserPrompt(sessionId);
         } else if (TYPE_MOCK.equals(type)) {
-            String systemPrompt = promptTemplateService.getTemplate(
+            systemPrompt = promptTemplateService.getTemplate(
                     resolveOccupation(session.getProjectId()),
                     com.fakemianshi.service.PromptTemplateService.Scene.MOCK_ANALYSIS.name(),
                     resolvePosition(session.getProjectId()));
-            analysisNode = onDelta == null
-                    ? callLlm(systemPrompt, buildMockUserPrompt(sessionId))
-                    : callLlmStream(systemPrompt, buildMockUserPrompt(sessionId), onDelta, onReasoning);
+            baseUserPrompt = buildMockUserPrompt(sessionId);
         } else {
             throw new BusinessException("不支持的会话类型: " + type);
         }
+        String userPrompt = baseUserPrompt + buildExistingPointsHint(session.getProjectId());
+        JsonNode analysisNode = onDelta == null
+                ? callLlm(systemPrompt, userPrompt)
+                : callLlmStream(systemPrompt, userPrompt, onDelta, onReasoning);
 
         SessionAnalysis analysis = toSessionAnalysis(sessionId, analysisNode);
         return persistAnalysis(sessionId, session.getProjectId(), type, analysisNode, analysis);
@@ -402,32 +407,15 @@ public class AnalysisServiceImpl implements AnalysisService {
             return;
         }
 
+        // 同一个知识点只留一行：写之前先按归一化键匹配已有标签（LLM 每次起的名字都不一样，
+        // 精确匹配会导致 occurrence_count 永远到不了 2，顽固弱点就永远判不出来）
         List<WeaknessTag> tags = new ArrayList<>(weaknessTagRepository.findByProjectId(projectId));
         for (String gap : knowledgeGaps) {
-            if (gap == null || gap.isBlank()) {
-                continue;
-            }
-            String point = gap.trim();
-            WeaknessTag tag = findTag(tags, point);
-            if (tag != null) {
-                int count = (tag.getOccurrenceCount() == null ? 0 : tag.getOccurrenceCount()) + 1;
-                tag.setOccurrenceCount(count);
-                tag.setMasteryLevel(resolveMasteryLevel(count));
-                tag.setLastSessionId(sessionId);
-                tag.setUpdatedAt(LocalDateTime.now());
-                weaknessTagRepository.updateById(tag);
-            } else {
-                WeaknessTag newTag = new WeaknessTag();
-                newTag.setProjectId(projectId);
-                newTag.setKnowledgePoint(point);
-                newTag.setMasteryLevel(resolveMasteryLevel(1)); // 首次出现 = 轻微(FAIR)
-                newTag.setOccurrenceCount(1);
-                newTag.setLastSessionId(sessionId);
-                newTag.setUpdatedAt(LocalDateTime.now());
-                weaknessTagRepository.insert(newTag);
-                tags.add(newTag); // 供同批后续知识点匹配
-            }
+            weaknessTagService.recordOccurrence(tags, projectId, sessionId, gap);
         }
+        // 写完顺手归并一次：模型偶尔仍会造出近义写法，立刻收敛，
+        // 免得用户下次分析完又在列表里看到两条几乎一样的知识点
+        weaknessTagService.consolidate(projectId);
     }
 
     /** 笔试简答题评分回流：把 LLM 分析出的 accuracy(0-10) 折算成简答题得分（满分 5 分）回写 written_test_answer */
@@ -632,6 +620,34 @@ public class AnalysisServiceImpl implements AnalysisService {
         return sb.toString();
     }
 
+    /**
+     * 把项目已有的知识点清单塞进分析 prompt，让模型尽量复用旧名字。
+     *
+     * <p>同义写法有两个来源：模型每次现起名字、以及不同轮次关注角度不同。
+     * 事后归一化只能收拾残局，而模型看到候选清单时是愿意照抄的 —— 从源头压住增量，
+     * 比事后合并便宜得多，也不会把两个本来不同的知识点错并成一个。
+     */
+    private String buildExistingPointsHint(Long projectId) {
+        if (projectId == null) {
+            return "";
+        }
+        List<WeaknessTag> tags = weaknessTagRepository.findByProjectId(projectId);
+        if (tags == null || tags.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("\n【已有知识点】\n");
+        sb.append("下面这些知识点在以往分析里已经记录过。若本次要标记的知识点与其中某一条是同一个，")
+                .append("请**直接照抄该条的名字**，不要换一种说法；只有确实是新知识点时才起新名字。\n");
+        int limit = Math.min(tags.size(), EXISTING_POINTS_LIMIT);
+        for (int i = 0; i < limit; i++) {
+            sb.append("- ").append(valueOrDash(tags.get(i).getKnowledgePoint())).append('\n');
+        }
+        if (tags.size() > limit) {
+            sb.append("（其余 ").append(tags.size() - limit).append(" 条略）\n");
+        }
+        return sb.toString();
+    }
+
     /** 组装历史分析上下文：历次会话分析结果摘要 */
     private String buildHistoryUserPrompt(Long projectId, List<SessionAnalysis> analyses) {
         StringBuilder sb = new StringBuilder("【历次面试分析结果】\n");
@@ -756,33 +772,6 @@ public class AnalysisServiceImpl implements AnalysisService {
             return true;
         }
         return a.length() >= 8 && b.length() >= 8 && (a.contains(b) || b.contains(a));
-    }
-
-    /** 在已有标签列表中按知识点匹配（忽略大小写或互相包含） */
-    private WeaknessTag findTag(List<WeaknessTag> tags, String knowledgePoint) {
-        for (WeaknessTag tag : tags) {
-            String point = tag.getKnowledgePoint();
-            if (point == null) {
-                continue;
-            }
-            if (point.equalsIgnoreCase(knowledgePoint)) {
-                return tag;
-            }
-            String a = point.trim();
-            String b = knowledgePoint.trim();
-            if (a.length() >= 4 && b.length() >= 4 && (a.contains(b) || b.contains(a))) {
-                return tag;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * 按累计出现次数判断薄弱程度：出现 >=2 次为 WEAK（顽固弱点），1 次为 FAIR（轻微）。
-     * 弱点标签仅记录"曾经薄弱"的知识点，故取值限定 WEAK/FAIR；GOOD/STRONG 预留给未来"已掌握/提升"判定。
-     */
-    private String resolveMasteryLevel(int occurrenceCount) {
-        return occurrenceCount >= 2 ? "WEAK" : "FAIR";
     }
 
     /**

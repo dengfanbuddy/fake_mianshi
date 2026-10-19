@@ -57,8 +57,10 @@ class ReviewServiceTest {
         questionRepository = mock(WrittenTestQuestionRepository.class);
         sessionRepository = mock(InterviewSessionRepository.class);
         weaknessTagRepository = mock(WeaknessTagRepository.class);
+        // 真实实现：知识点同义匹配（findSameTopic / 别名解析）就是被测行为
         service = new ReviewServiceImpl(answerRepository, questionRepository,
-                sessionRepository, weaknessTagRepository);
+                sessionRepository, weaknessTagRepository,
+                new com.fakemianshi.service.impl.WeaknessTagServiceImpl(weaknessTagRepository));
 
         when(questionRepository.selectById(anyLong()))
                 .thenAnswer(inv -> questions.get(inv.<Long>getArgument(0)));
@@ -80,6 +82,10 @@ class ReviewServiceTest {
                 .thenAnswer(inv -> sessions.get(inv.<Long>getArgument(0)));
         when(weaknessTagRepository.findByProjectId(anyLong())).thenAnswer(inv -> new ArrayList<>(tags));
         when(weaknessTagRepository.updateById(any(WeaknessTag.class))).thenReturn(1);
+        when(weaknessTagRepository.selectById(anyLong()))
+                .thenAnswer(inv -> tags.stream()
+                        .filter(t -> t.getId().equals(inv.<Long>getArgument(0)))
+                        .findFirst().orElse(null));
 
         // 会话：session 10 属于 project 1
         InterviewSession session = new InterviewSession();
@@ -132,7 +138,7 @@ class ReviewServiceTest {
         addQuestion(1, "SINGLE_CHOICE", "B", "[\"LongAdder\"]");
         addAnswer(100, 1, false, "A");
 
-        List<WrongQuestionItem> items = service.listWrongQuestions(1L, null, null);
+        List<WrongQuestionItem> items = service.listWrongQuestions(1L, null, null, null);
 
         assertEquals(1, items.size());
         WrongQuestionItem item = items.get(0);
@@ -152,12 +158,12 @@ class ReviewServiceTest {
         addAnswer(101, 2, false, "AC");
 
         // 两道错题都还没订正
-        assertEquals(2, service.listWrongQuestions(1L, "pending", null).size());
-        assertEquals(0, service.listWrongQuestions(1L, "corrected", null).size());
-        assertEquals(2, service.listWrongQuestions(1L, null, null).size());
+        assertEquals(2, service.listWrongQuestions(1L, "pending", null, null).size());
+        assertEquals(0, service.listWrongQuestions(1L, "corrected", null, null).size());
+        assertEquals(2, service.listWrongQuestions(1L, null, null, null).size());
 
         // 知识点做包含匹配：用 "Redis" 能命中 "Redis 原子性"
-        List<WrongQuestionItem> byPoint = service.listWrongQuestions(1L, null, "Redis");
+        List<WrongQuestionItem> byPoint = service.listWrongQuestions(1L, null, "Redis", null);
         assertEquals(1, byPoint.size());
         assertEquals(2L, byPoint.get(0).getQuestionId());
     }
@@ -185,8 +191,8 @@ class ReviewServiceTest {
         assertNotNull(again.getCorrectedAt());
 
         // 订正后原题仍在错题本里（is_correct 保持 false，靠 corrected_at 标记）
-        assertEquals(1, service.listWrongQuestions(1L, "corrected", null).size());
-        assertEquals(0, service.listWrongQuestions(1L, "pending", null).size());
+        assertEquals(1, service.listWrongQuestions(1L, "corrected", null, null).size());
+        assertEquals(0, service.listWrongQuestions(1L, "pending", null, null).size());
     }
 
     @Test
@@ -285,8 +291,51 @@ class ReviewServiceTest {
         addQuestion(1, "SINGLE_CHOICE", "B", "not-json");
         addAnswer(100, 1, false, "A");
 
-        List<WrongQuestionItem> items = service.listWrongQuestions(1L, null, null);
+        List<WrongQuestionItem> items = service.listWrongQuestions(1L, null, null, null);
         assertEquals(1, items.size());
         assertTrue(items.get(0).getKnowledgePoints().isEmpty(), "脏知识点按空处理，不能炸整页");
+    }
+
+    @Test
+    void listWrongQuestions_shouldFilterByTagIdThroughAliases() {
+        // 题目的知识点写法与标签代表写法毫无关系，只能靠别名搭桥
+        addQuestion(1, "SINGLE_CHOICE", "B", "[\"LongAdder与AtomicLong的区别及适用场景\"]");
+        addQuestion(2, "SINGLE_CHOICE", "B", "[\"线程池哈希分发与线程安全\"]");
+        addAnswer(100, 1, false, "A");
+        addAnswer(101, 2, false, "A");
+
+        WeaknessTag tag = new WeaknessTag();
+        tag.setId(7L);
+        tag.setProjectId(1L);
+        tag.setKnowledgePoint("线上故障排查方法论");
+        tag.setAliases("[\"LongAdder与AtomicLong的区别及适用场景\"]");
+        tag.setMasteryLevel("WEAK");
+        tags.add(tag);
+
+        List<WrongQuestionItem> items = service.listWrongQuestions(1L, null, null, 7L);
+        assertEquals(1, items.size(), "按标签筛选要看该标签的全部同义写法");
+        assertEquals(1L, items.get(0).getQuestionId());
+
+        // 标签属于别的项目时不能串项目
+        tag.setProjectId(2L);
+        assertEquals(0, service.listWrongQuestions(1L, null, null, 7L).size());
+    }
+
+    @Test
+    void retry_shouldUpgradeMasteryForSameTopicWithDifferentWording() {
+        // 题目知识点与弱点标签的写法不同，但确实是同一个知识点。
+        // 改前这里按名字精确匹配，静默失效：订正了掌握度却不动。
+        addQuestion(1, "SINGLE_CHOICE", "B", "[\"LongAdder底层实现原理\"]");
+        addAnswer(100, 1, false, "A");
+
+        WeaknessTag tag = new WeaknessTag();
+        tag.setId(1L);
+        tag.setProjectId(1L);
+        tag.setKnowledgePoint("LongAdder与AtomicLong的区别及适用场景");
+        tag.setMasteryLevel("WEAK");
+        tags.add(tag);
+
+        assertTrue(service.retry(1L, "B").isCorrect());
+        assertEquals("GOOD", tag.getMasteryLevel(), "同一知识点的不同写法也要能上调掌握度");
     }
 }

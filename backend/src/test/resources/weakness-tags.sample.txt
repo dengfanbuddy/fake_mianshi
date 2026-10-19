@@ -1,0 +1,71 @@
+# 真实项目（项目 1）跑了几轮分析后积累的 69 条弱点标签，一行一条。
+# 用途：KnowledgePointNormalizerTest 用它做回归，防止调参把归并效果改坏。
+LongAdder与AtomicLong的区别及适用场景
+高并发下的分段累加原理与失效场景
+Java线程池与哈希分发的实现细节
+竞态条件与原子性保证（SETNX、Lua脚本、分布式锁）
+Redis单线程模型与多命令原子性问题
+线上故障排查流程与定位思路
+架构决策复盘方法论
+LongAdder与AtomicLong的原理与区别
+Redis原子操作与Lua脚本
+分布式锁Redisson
+线程池哈希分发与线程安全
+线上故障排查方法论
+架构决策与容量评估（单服与分布式）
+LongAdder底层实现原理
+LongAdder.sum()弱一致性
+Redisson看门狗机制
+Redisson加锁Lua脚本与Redis原子性
+JVM线程状态与CPU消耗关系
+JVM故障排查工具链
+死锁检测
+LongAdder底层原理
+Redis单线程模型与Lua原子性
+Redisson看门狗与leaseTime
+Redis分布式锁完整方案
+CPU飙高排查SOP
+线程亲和性与顺序保证
+HashMap并发死循环
+架构决策量化指标
+LongAdder 底层原理（Striped64）
+LongAdder.sum() 弱一致性
+线程亲和性与多队列模型
+热点队列动态调度
+Redisson 看门狗机制
+Redisson 加锁 Lua 脚本与原子性
+Redis 单线程模型 vs 多命令原子性
+CPU 飙高排查链路
+线程状态与 dump 识别
+HashMap 并发死循环与热点代码
+LongAdder内部执行路径
+Redis单线程模型与命令原子性
+线程亲和性哈希分发
+线程dump死锁与锁竞争识别
+架构拆分量化指标
+Redisson分布式锁Lua脚本与原子性
+线上故障排查SOP（CPU飙高）
+JUC并发工具（LongAdder vs AtomicLong）
+线程池与线程分配策略
+分布式锁与竞态条件
+线程池哈希分发与跨玩家操作的并发控制
+LongAdder源码执行路径
+Redis单线程模型与原子性
+JVM线程状态与CPU飙高排查
+线程池顺序保证与热点倾斜
+jstack死锁与锁竞争识别
+CPU飙高排查完整SOP
+架构拆分决策的数据支撑
+Redisson分布式锁Lua脚本与看门狗机制
+Redis单线程模型与竞态条件
+线上故障排查命令与流程
+线程池热点倾斜与动态调度
+LongAdder与AtomicLong原理及区别
+JVM线程快照与CPU飙高排查
+跨节点并发控制与分布式锁
+线程WAITING状态分析与死锁排查
+Redis分布式锁的原子性实现
+LongAdder与AtomicLong的区别及底层原理
+RPC失败处理策略（重试、超时、降级、补偿）
+高并发场景下的架构设计（战斗服与功能服拆分）
+GM后台重构的技术方案与量化收益

@@ -65,6 +65,12 @@ public class DatabaseMigration {
             ensureColumn(conn, "written_test_answer", "corrected_at", "VARCHAR(40)");
             ensureColumn(conn, "written_test_answer", "retry_count", "INTEGER DEFAULT 0");
 
+            // weakness_tag：LLM 每轮给弱点现起名字，同一个知识点会有十几种写法。
+            // canonical_point 存归一后的键（同义写法共享），aliases 存同义写法列表（JSON 数组）。
+            // 旧库补齐后由 WeaknessTagService.consolidate 在建列后统一回填 + 归并。
+            ensureColumn(conn, "weakness_tag", "canonical_point", "VARCHAR(200)");
+            ensureColumn(conn, "weakness_tag", "aliases", "TEXT");
+
             log.info("数据库迁移检查完成");
         } catch (Exception e) {
             log.warn("数据库迁移失败（可忽略，后续启动会重试）: {}", e.getMessage());

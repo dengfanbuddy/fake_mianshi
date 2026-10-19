@@ -27,15 +27,22 @@ const wrongList = ref([])
 const weaknessTags = ref([])
 const loading = ref(false)
 const statusFilter = ref('all')
-const pointFilter = ref('')
+/** 当前按哪个弱点标签筛选（用 id 而不是名字：标签的名字会随归并变化） */
+const activeTag = ref(null)
 const retryVisible = ref(false)
 const retrying = ref(null)
+const showAllTags = ref(false)
+
+/** 侧栏默认只显示这么多条，其余的收起来——不收起的话几十条一屏放不下 */
+const TAG_PREVIEW_LIMIT = 8
 
 const statusOptions = [
   { value: 'all', label: '全部' },
   { value: 'pending', label: '待订正' },
   { value: 'corrected', label: '已订正' },
 ]
+
+const MASTERY_ORDER = { WEAK: 0, FAIR: 1, GOOD: 2, STRONG: 3 }
 
 const masteryMeta = (level) =>
   ({
@@ -44,6 +51,27 @@ const masteryMeta = (level) =>
     GOOD: { type: 'success', label: '良好' },
     STRONG: { type: 'primary', label: '优秀' },
   })[level] || { type: 'info', label: level || '未知' }
+
+/** 薄弱优先、出现次数多的优先：复习时要先看真正顽固的 */
+const sortedWeaknessTags = computed(() =>
+  [...weaknessTags.value].sort((a, b) => {
+    const rank = (MASTERY_ORDER[a.masteryLevel] ?? 9) - (MASTERY_ORDER[b.masteryLevel] ?? 9)
+    if (rank !== 0) return rank
+    const count = (b.occurrenceCount || 0) - (a.occurrenceCount || 0)
+    if (count !== 0) return count
+    return (a.knowledgePoint || '').localeCompare(b.knowledgePoint || '')
+  })
+)
+
+const visibleWeaknessTags = computed(() =>
+  showAllTags.value
+    ? sortedWeaknessTags.value
+    : sortedWeaknessTags.value.slice(0, TAG_PREVIEW_LIMIT)
+)
+
+const hiddenTagCount = computed(() =>
+  Math.max(0, sortedWeaknessTags.value.length - TAG_PREVIEW_LIMIT)
+)
 
 const currentProjectName = computed(
   () => projects.value.find((p) => p.id === projectId.value)?.name || ''
@@ -58,7 +86,7 @@ const progressPercent = computed(() => {
 
 /** 空列表文案要区分「没筛到」和「真没有」 */
 const wrongListDescription = computed(() => {
-  if (pointFilter.value) return `「${pointFilter.value}」下还没有错题记录`
+  if (activeTag.value) return `「${activeTag.value.knowledgePoint}」下还没有错题记录`
   if (statusFilter.value === 'pending') return '没有待订正的错题，保持住'
   if (statusFilter.value === 'corrected') return '还没有订正过的错题'
   return '这个项目还没有错题记录，先去做一次笔试吧'
@@ -81,7 +109,7 @@ async function fetchAll() {
       getReviewOverview(projectId.value).catch(() => null),
       getWrongQuestions(projectId.value, {
         status: statusFilter.value,
-        knowledgePoint: pointFilter.value,
+        tagId: activeTag.value?.id ?? null,
       }).catch(() => null),
       getWeaknessTags(projectId.value).catch(() => null),
     ])
@@ -95,8 +123,9 @@ async function fetchAll() {
 
 function selectProject(id) {
   projectId.value = id
-  pointFilter.value = ''
+  activeTag.value = null
   statusFilter.value = 'all'
+  showAllTags.value = false
   try {
     localStorage.setItem(LAST_PROJECT_KEY, String(id))
   } catch (e) {
@@ -106,8 +135,9 @@ function selectProject(id) {
   fetchAll()
 }
 
-function togglePoint(point) {
-  pointFilter.value = pointFilter.value === point ? '' : point
+function toggleTag(tag) {
+  activeTag.value = activeTag.value?.id === tag.id ? null : tag
+  fetchAll()
 }
 
 function openRetry(item) {
@@ -200,23 +230,53 @@ onMounted(async () => {
           <template #header>
             <div class="side-head">
               <span>薄弱知识点</span>
-              <el-button v-if="pointFilter" link type="primary" size="small" @click="pointFilter = ''">
+              <el-button v-if="activeTag" link type="primary" size="small" @click="toggleTag(activeTag)">
                 清除筛选
               </el-button>
             </div>
           </template>
           <div v-if="weaknessTags.length" class="weak-list">
-            <div
-              v-for="tag in weaknessTags"
+            <el-tooltip
+              v-for="tag in visibleWeaknessTags"
               :key="tag.id"
-              :class="['weak-item', { active: pointFilter === tag.knowledgePoint }]"
-              @click="togglePoint(tag.knowledgePoint)"
+              placement="right"
+              :disabled="!tag.aliasList?.length"
             >
-              <span class="weak-name">{{ tag.knowledgePoint }}</span>
-              <el-tag :type="masteryMeta(tag.masteryLevel).type" size="small" effect="dark">
-                {{ masteryMeta(tag.masteryLevel).label }}
-              </el-tag>
-            </div>
+              <template #content>
+                <div class="alias-tip">
+                  <div class="alias-tip-title">同一个知识点的 {{ tag.aliasList.length + 1 }} 种写法：</div>
+                  <div v-for="(alias, i) in tag.aliasList" :key="i">· {{ alias }}</div>
+                </div>
+              </template>
+              <div
+                :class="['weak-item', { active: activeTag?.id === tag.id }]"
+                @click="toggleTag(tag)"
+              >
+                <span class="weak-name">{{ tag.knowledgePoint }}</span>
+                <el-tag
+                  v-if="tag.aliasList?.length"
+                  size="small"
+                  type="info"
+                  effect="plain"
+                  class="alias-tag"
+                >
+                  {{ tag.aliasList.length + 1 }} 种说法
+                </el-tag>
+                <el-tag :type="masteryMeta(tag.masteryLevel).type" size="small" effect="dark">
+                  {{ masteryMeta(tag.masteryLevel).label }}
+                </el-tag>
+              </div>
+            </el-tooltip>
+            <el-button
+              v-if="hiddenTagCount"
+              link
+              type="primary"
+              size="small"
+              class="more-btn"
+              @click="showAllTags = !showAllTags"
+            >
+              {{ showAllTags ? '收起' : `显示全部 ${sortedWeaknessTags.length} 条（还有 ${hiddenTagCount} 条）` }}
+            </el-button>
           </div>
           <el-empty v-else description="暂无薄弱知识点（完成一次面试分析后生成）" :image-size="60" />
           <div class="side-hint">点击知识点可筛选与之相关的错题</div>
@@ -231,8 +291,11 @@ onMounted(async () => {
               {{ o.label }}
             </el-radio-button>
           </el-radio-group>
-          <span v-if="pointFilter" class="filter-hint">
-            正在看「{{ pointFilter }}」相关错题
+          <span v-if="activeTag" class="filter-hint">
+            正在看「{{ activeTag.knowledgePoint }}」相关错题
+            <template v-if="activeTag.aliasList?.length">
+              （含 {{ activeTag.aliasList.length }} 种同义写法）
+            </template>
           </span>
           <span class="spacer"></span>
           <span class="count-hint">{{ wrongList.length }} 道</span>
@@ -351,10 +414,28 @@ onMounted(async () => {
   box-shadow: inset 0 0 0 1px #409eff;
 }
 .weak-name {
+  flex: 1;
   font-size: 13px;
   color: #303133;
   line-height: 1.4;
   word-break: break-word;
+}
+.alias-tag {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.more-btn {
+  align-self: flex-start;
+  padding-left: 2px;
+}
+.alias-tip {
+  font-size: 12px;
+  line-height: 1.6;
+  max-width: 360px;
+}
+.alias-tip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 .side-hint {
   margin-top: 10px;

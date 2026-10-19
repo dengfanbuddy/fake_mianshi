@@ -17,4 +17,8 @@ public interface WeaknessTagRepository extends BaseMapper<WeaknessTag> {
     /** 查询某项目下的全部弱点标签 */
     @Select("SELECT * FROM weakness_tag WHERE project_id = #{projectId}")
     List<WeaknessTag> findByProjectId(Long projectId);
+
+    /** 库里出现过的全部项目 ID（启动时归并要逐个项目跑） */
+    @Select("SELECT DISTINCT project_id FROM weakness_tag WHERE project_id IS NOT NULL")
+    List<Long> findAllProjectIds();
 }

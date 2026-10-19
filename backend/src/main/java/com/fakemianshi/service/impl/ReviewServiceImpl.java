@@ -13,6 +13,8 @@ import com.fakemianshi.repository.WeaknessTagRepository;
 import com.fakemianshi.repository.WrittenTestAnswerRepository;
 import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.ReviewService;
+import com.fakemianshi.service.WeaknessTagService;
+import com.fakemianshi.util.KnowledgePointNormalizer;
 import com.fakemianshi.util.WrittenTestGrader;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -58,6 +60,7 @@ public class ReviewServiceImpl implements ReviewService {
     private final WrittenTestQuestionRepository questionRepository;
     private final InterviewSessionRepository sessionRepository;
     private final WeaknessTagRepository weaknessTagRepository;
+    private final WeaknessTagService weaknessTagService;
 
     /** 作答 + 题目（错题本的所有展示与统计都需要两者） */
     private record WrongRow(WrittenTestAnswer answer, WrittenTestQuestion question) {
@@ -85,8 +88,9 @@ public class ReviewServiceImpl implements ReviewService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<WrongQuestionItem> listWrongQuestions(Long projectId, String status, String knowledgePoint) {
+    public List<WrongQuestionItem> listWrongQuestions(Long projectId, String status, String knowledgePoint, Long tagId) {
         List<WrongRow> rows = loadWrongRows(projectId);
+        List<String> wantedPoints = resolveMatchPoints(projectId, tagId, knowledgePoint);
         List<WrongQuestionItem> items = new ArrayList<>(rows.size());
         for (WrongRow row : rows) {
             boolean corrected = row.answer().getCorrectedAt() != null;
@@ -97,8 +101,7 @@ public class ReviewServiceImpl implements ReviewService {
                 continue;
             }
             List<String> points = parseStringList(row.question().getKnowledgePoints());
-            if (knowledgePoint != null && !knowledgePoint.isBlank()
-                    && points.stream().noneMatch(p -> p.contains(knowledgePoint.trim()))) {
+            if (wantedPoints != null && !matchesAny(points, wantedPoints)) {
                 continue;
             }
             items.add(toItem(row, points, corrected));
@@ -147,6 +150,53 @@ public class ReviewServiceImpl implements ReviewService {
     }
 
     // ---------------- 内部 ----------------
+
+    /**
+     * 把「按哪个知识点筛」翻译成一组可用于匹配的写法。
+     *
+     * <p>必须按标签的全部同义写法匹配，不能只拿代表写法做子串比较：题目上的知识点是 LLM
+     * 生成题目时写的原始写法，与标签合并后保留的代表写法十有八九不一致，
+     * 只比代表写法会让「点知识点筛选 → 一条都不剩」。
+     *
+     * @return null 表示不筛选；空列表表示筛了但筛不到任何东西（如标签已被归并删除）
+     */
+    private List<String> resolveMatchPoints(Long projectId, Long tagId, String knowledgePoint) {
+        if (tagId != null) {
+            WeaknessTag tag = weaknessTagRepository.selectById(tagId);
+            if (tag == null || (projectId != null && !projectId.equals(tag.getProjectId()))) {
+                // 标签已不存在（可能刚被归并掉）或不属于该项目：明确筛空，
+                // 而不是悄悄忽略筛选条件把全部错题都端出来
+                return List.of();
+            }
+            List<String> points = new ArrayList<>();
+            if (tag.getKnowledgePoint() != null && !tag.getKnowledgePoint().isBlank()) {
+                points.add(tag.getKnowledgePoint());
+            }
+            points.addAll(weaknessTagService.aliasesOf(tag));
+            return points;
+        }
+        if (knowledgePoint != null && !knowledgePoint.isBlank()) {
+            return List.of(knowledgePoint.trim());
+        }
+        return null;
+    }
+
+    /** 题目的任一知识点与待筛写法同义（或互相包含）即算命中 */
+    private boolean matchesAny(List<String> questionPoints, List<String> wanted) {
+        for (String point : questionPoints) {
+            for (String target : wanted) {
+                if (KnowledgePointNormalizer.sameTopic(point, target)) {
+                    return true;
+                }
+                String a = point.trim();
+                String b = target.trim();
+                if (a.length() >= 4 && b.length() >= 4 && (a.contains(b) || b.contains(a))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 
     private WrongQuestionItem toItem(WrongRow row, List<String> points, boolean corrected) {
         WrongQuestionItem item = new WrongQuestionItem();
@@ -219,10 +269,7 @@ public class ReviewServiceImpl implements ReviewService {
             if (target == null) {
                 continue;
             }
-            WeaknessTag tag = tags.stream()
-                    .filter(t -> point.equals(t.getKnowledgePoint()))
-                    .findFirst()
-                    .orElse(null);
+            WeaknessTag tag = weaknessTagService.findSameTopic(tags, point);
             if (tag == null) {
                 continue;
             }
