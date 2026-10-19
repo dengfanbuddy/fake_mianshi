@@ -1,7 +1,7 @@
 [project]
 name = "voice-service"
 version = "0.1.0"
-description = "本地 Qwen3-TTS 语音合成 sidecar（供 Spring Boot 后端调用）"
+description = "本地 Qwen3 语音 sidecar：TTS 合成 + ASR 识别（供 Spring Boot 后端调用）"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.115",

@@ -17,10 +17,9 @@ from typing import Any, Iterator
 import numpy as np
 
 from . import config
+from .gpu import GPU_LOCK as _GPU_LOCK
 
 log = logging.getLogger("voice-service.tts")
-
-_GPU_LOCK = threading.Lock()
 
 
 def _to_numpy(audio: Any) -> np.ndarray:
@@ -116,8 +115,11 @@ class TtsEngine:
                      self.model_path, config.BACKEND, config.DEVICE)
             self.model = self._load_faster(FasterQwen3TTS)
             self.kind = "faster"
-        except ImportError:
-            log.warning("未安装 faster-qwen3-tts，降级为官方 qwen-tts（无流式）")
+        except ImportError as exc:
+            # 注意：这里必须把异常打出来。曾经出现过 ASR 侧并发导入 torch/transformers
+            # 与本模块导入撞车导致 ImportError，然后静默降级成官方 backend，
+            # TTS 的 RTF 从 ~2.0 掉到 ~0.3，而日志里只有一句"未安装"，极难排查。
+            log.warning("faster-qwen3-tts 不可用，降级为官方 qwen-tts（无流式，慢约 5-7 倍）: %r", exc)
             from qwen_tts import Qwen3TTSModel  # type: ignore
 
             self.model = Qwen3TTSModel.from_pretrained(

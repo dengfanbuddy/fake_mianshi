@@ -6,22 +6,28 @@ import os
 from pathlib import Path
 
 
-def _detect_local_model() -> str | None:
-    """自动发现 voice-service/models 下已下载的模型目录（含 config.json 的目录）。
-
-    多个时优先 CustomVoice（本服务只用 CustomVoice 的预置音色），否则取第一个。
-    """
+def _model_candidates(match: str) -> list[Path]:
+    """voice-service/models 下含 config.json 的模型目录，名字命中 ``match`` 的排前面。"""
     models_dir = Path(__file__).resolve().parent.parent / "models"
     if not models_dir.is_dir():
-        return None
-    candidates = [p for p in sorted(models_dir.iterdir())
-                  if p.is_dir() and (p / "config.json").is_file()]
-    if not candidates:
-        return None
-    for path in candidates:
-        if "CustomVoice" in path.name:
-            return str(path)
-    return str(candidates[0])
+        return []
+    found = [p for p in sorted(models_dir.iterdir())
+             if p.is_dir() and (p / "config.json").is_file()]
+    return [p for p in found if match in p.name] + [p for p in found if match not in p.name]
+
+
+def _detect_local_model() -> str | None:
+    """自动发现 TTS 模型目录（优先 CustomVoice：本服务只用它的预置音色）。
+
+    注意必须排除 ASR 目录，否则装了两张模型后可能把 ASR 权重当 TTS 加载。
+    """
+    candidates = [p for p in _model_candidates("CustomVoice") if "ASR" not in p.name]
+    return str(candidates[0]) if candidates else None
+
+def _detect_local_asr_model() -> str | None:
+    """自动发现 ASR 模型目录（名字含 ASR）。"""
+    candidates = [p for p in _model_candidates("ASR") if "ASR" in p.name]
+    return str(candidates[0]) if candidates else None
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -57,3 +63,31 @@ PRELOAD = os.getenv("VOICE_PRELOAD", "1") not in ("0", "false", "False")
 
 # 默认语言
 DEFAULT_LANGUAGE = os.getenv("QWEN_TTS_LANGUAGE", "Chinese")
+
+
+# ---------------- ASR（语音识别，Qwen3-ASR） ----------------
+# 关掉后 /asr 返回 503，后端会自动回退腾讯云（若已配置密钥）
+ASR_ENABLED = os.getenv("VOICE_ASR_ENABLED", "1") not in ("0", "false", "False")
+
+# 权重：优先环境变量；其次 models/ 下名字含 ASR 的目录；最后回落 HF 仓库名（会联网下载）
+ASR_MODEL = os.getenv("QWEN_ASR_MODEL") or _detect_local_asr_model() or "Qwen/Qwen3-ASR-0.6B-hf"
+
+# 推理设备 / 精度（4070 Ti SUPER 走 bf16）
+ASR_DEVICE = os.getenv("QWEN_ASR_DEVICE", DEVICE)
+ASR_DTYPE = os.getenv("QWEN_ASR_DTYPE", "bfloat16")
+
+# 启动即预加载（关掉则等第一个 /asr 请求时懒加载，首包会慢十几秒）
+ASR_PRELOAD = os.getenv("VOICE_ASR_PRELOAD", "1") not in ("0", "false", "False")
+
+# 解码上限：中文正常语速 1 秒 ≈ 4~5 字，256 token 足够一分钟以上的回答
+ASR_MAX_NEW_TOKENS = int(os.getenv("QWEN_ASR_MAX_NEW_TOKENS", "256"))
+
+# 强制语种（Chinese / zh）；空表示让模型自动检测（会多输出一个 language 字段）
+ASR_LANGUAGE = os.getenv("QWEN_ASR_LANGUAGE", "")
+
+# 领域热词（走 system prompt 偏置）。面试场景专有名词多，填了能明显减少同音错字，
+# 例如：术语：Kubernetes、Redis、分库分表、幂等、熔断降级。
+ASR_PROMPT = os.getenv("QWEN_ASR_PROMPT", "")
+
+# 单次识别音频上限（秒）：防误把整场录音塞进来，正常一轮回答远小于此值
+ASR_MAX_AUDIO_SECONDS = float(os.getenv("VOICE_ASR_MAX_AUDIO_SECONDS", "120"))
