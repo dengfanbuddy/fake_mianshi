@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+// ElMessage 由按需引入插件自动注入（见 vite.config.js）
 
 const request = axios.create({ baseURL: '/api', timeout: 120000 })
 

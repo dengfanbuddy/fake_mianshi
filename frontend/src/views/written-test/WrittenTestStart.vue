@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { WarningFilled } from '@element-plus/icons-vue'
 import { useWrittenTestStore } from '../../stores/writtenTest'
 
@@ -33,14 +32,19 @@ const failReason = ref('')
 
 let timer = null
 let idleTimer = null
+// 8 秒兜底定时器句柄：必须保存，否则重试时上一轮的定时器会在第 8 秒
+// abort 掉新一轮的 controller（用户会看到莫名其妙的"AI 连接无响应"）
+let idleTimeout = null
 let controller = null
 const finished = ref(false) // 已成功完成（避免超时计时器误触发失败）
 
 function resetTimers() {
   if (timer) clearInterval(timer)
   if (idleTimer) clearInterval(idleTimer)
+  if (idleTimeout) clearTimeout(idleTimeout)
   timer = null
   idleTimer = null
+  idleTimeout = null
 }
 
 function startTimers() {
@@ -59,7 +63,7 @@ function startTimers() {
     }
   }, 1000)
   // 8 秒无任何事件 → 明确失败提示 + 重试按钮（避免无限挂起）
-  setTimeout(() => {
+  idleTimeout = setTimeout(() => {
     if (waiting.value && !finished.value && !streamText.value && !streamReasoning.value) {
       abortByTimeout('AI 连接无响应（8 秒无任何内容），请点击重新尝试')
     }
@@ -157,10 +161,13 @@ function handleDone(data) {
     return
   }
   if (res?.sessionId) {
-    // 以服务端返回的 startedAt 为基准计算截止时间，避免刷新后重置倒计时
-    const deadline = res.startedAt
-      ? res.startedAt + (res.timeLimit || 60) * 60000
-      : Date.now() + (res.timeLimit || 60) * 60000
+    // 优先用服务端下发的 deadline（权威）；拿不到时才退回本地推导，
+    // 避免前端改本地时间或缓存就能延长考试
+    const deadline = Number.isFinite(res.deadline)
+      ? res.deadline
+      : res.startedAt
+        ? res.startedAt + (res.timeLimit || 60) * 60000
+        : Date.now() + (res.timeLimit || 60) * 60000
     store.save({
       sessionId: res.sessionId,
       projectId,

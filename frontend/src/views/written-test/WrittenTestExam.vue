@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { submitTest, getExamInProgress } from '../../api/written-test'
@@ -161,6 +160,10 @@ async function handleSubmit() {
   try {
     const res = await submitTest(sessionId, buildAnswers())
     if (res.code === 200) {
+      // 服务端计时校验结果：超时提交照常出成绩，但明确告知用户成绩仅供参考
+      if (res.data?.expired) {
+        ElMessage.warning('本次交卷已超出考试时长，成绩仅供参考')
+      }
       clearAnswers()
       const pid = store.session?.projectId
       const flow = store.session?.flow
@@ -194,9 +197,12 @@ onMounted(async () => {
     const res = await getExamInProgress(sessionId)
     if (res.code === 200 && res.data?.questions?.length) {
       const dto = res.data
-      const deadline = dto.startedAt
-        ? dto.startedAt + (dto.timeLimit || 60) * 60000
-        : Date.now() + (dto.timeLimit || 60) * 60000
+      // 服务端下发的 deadline 为权威值；缺失时才退回本地推导
+      const deadline = Number.isFinite(dto.deadline)
+        ? dto.deadline
+        : dto.startedAt
+          ? dto.startedAt + (dto.timeLimit || 60) * 60000
+          : Date.now() + (dto.timeLimit || 60) * 60000
       store.save({
         sessionId,
         projectId: dto.projectId || route.query.projectId || session?.projectId || null,

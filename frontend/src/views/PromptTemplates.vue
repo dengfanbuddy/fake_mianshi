@@ -1,6 +1,5 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, Refresh, MagicStick } from '@element-plus/icons-vue'
 import {
   getPromptTemplates,

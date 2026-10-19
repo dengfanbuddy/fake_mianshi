@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { getTestDetail } from '../../api/written-test'
 
 const route = useRoute()
@@ -28,13 +27,35 @@ const scoreRate = computed(() =>
   totalCount.value ? Math.round((correctCount.value / totalCount.value) * 100) : 0
 )
 
-function formatAnswer(s) {
-  if (s === undefined || s === null || s === '') return '未作答'
-  // 多选答案如 "AB" → "A、B"
-  if (typeof s === 'string' && /^[A-Za-z]+$/.test(s) && s.length > 1) {
-    return s.split('').join('、')
+/** 超时提交提示文案：说明设定时长与实际用时，避免用户误把这个分数当成真实水平 */
+const expiredDesc = computed(() => {
+  const limit = detail.value?.timeLimit
+  const used = detail.value?.elapsedSeconds
+  if (!limit || used === undefined || used === null) {
+    return '本次作答超出了设定时长，成绩仅供参考。'
   }
-  return s
+  const usedMin = Math.max(1, Math.round(used / 60))
+  return `设定时长 ${limit} 分钟，实际用时约 ${usedMin} 分钟，成绩仅供参考。`
+})
+
+/**
+ * 格式化答案展示。
+ *
+ * <p>只有多选题的 "AB" 才需要拆成 "A、B"。填空题 / 简答题的答案本身可能就是
+ * 纯字母单词（如 "HashMap"、"Java"），若不分题型一律拆分会被错误渲染成
+ * "H、a、s、h、M、a、p"，因此必须按 type 判断。
+ */
+function formatAnswer(value, type) {
+  if (value === undefined || value === null || value === '') return '未作答'
+  if (
+    type === 'MULTIPLE_CHOICE' &&
+    typeof value === 'string' &&
+    /^[A-Za-z]+$/.test(value) &&
+    value.length > 1
+  ) {
+    return value.split('').join('、')
+  }
+  return value
 }
 
 function fetchDetail() {
@@ -76,6 +97,16 @@ onMounted(fetchDetail)
   <div class="result-page">
     <div class="result-card">
       <h2 class="result-title">笔试结果</h2>
+
+      <el-alert
+        v-if="!loading && detail?.expired"
+        type="warning"
+        :closable="false"
+        show-icon
+        class="expired-alert"
+        title="本次笔试为超时提交"
+        :description="expiredDesc"
+      />
 
       <div v-loading="loading" class="summary">
         <el-statistic title="总分" :value="totalScore" class="score-stat">
@@ -132,12 +163,12 @@ onMounted(fetchDetail)
             <div class="answer-row">
               <span class="label">你的答案：</span>
               <span :class="['value', { wrong: r.isCorrect === false }]">
-                {{ formatAnswer(r.userAnswer) }}
+                {{ formatAnswer(r.userAnswer, r.type) }}
               </span>
             </div>
             <div v-if="r.isCorrect !== true" class="answer-row">
               <span class="label">正确答案：</span>
-              <span class="value correct">{{ formatAnswer(r.correctAnswer) }}</span>
+              <span class="value correct">{{ formatAnswer(r.correctAnswer, r.type) }}</span>
             </div>
             <div v-if="r.isCorrect === null && r.type === 'SHORT_ANSWER'" class="answer-row ai-tip">
               简答题将由 AI 批改，点击下方「查看 AI 分析」获取详细评价。
@@ -179,6 +210,9 @@ onMounted(fetchDetail)
   margin: 0 0 24px;
   font-size: 22px;
   text-align: center;
+}
+.expired-alert {
+  margin-bottom: 20px;
 }
 .summary {
   display: flex;

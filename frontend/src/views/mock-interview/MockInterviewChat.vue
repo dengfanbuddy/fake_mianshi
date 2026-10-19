@@ -1,208 +1,134 @@
 <script setup>
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import AudioRecorder from '../../components/AudioRecorder.vue'
-import {
-  startMockInterview,
-  respondMockInterview,
-  respondMockInterviewStream,
-  concludeMockInterview,
-  getMockInterviewMessages,
-  switchPersona,
-  getPersonaList,
-} from '../../api/mock-interview'
-import { recognizeSpeech, synthesizeSpeech, uploadAudio } from '../../api/voice'
-import { blobToWav } from '../../utils/audio'
-import { createVoiceStream } from '../../utils/voiceStream'
-import { PcmQueuePlayer } from '../../utils/audioQueue'
+/**
+ * AI 模拟面试对话页：只做会话编排与组合。
+ * - 会话（开始 / 结束 / 刷新恢复）：composables/useInterviewSession
+ * - 回复（发消息 / 流式回复 / 非流式回退）：composables/useInterviewReply
+ * - 语音（WebSocket 流式 + PCM 播放 + 录音回退）：composables/useVoiceStream
+ * - 换面试官（手动 + AI 建议）：composables/usePersonaSwitch
+ * - 展示区块：components/mock-interview/*
+ */
+import { ref, onBeforeUnmount, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useInterviewSession } from '../../composables/useInterviewSession'
+import { useInterviewReply } from '../../composables/useInterviewReply'
+import { useVoiceStream } from '../../composables/useVoiceStream'
+import { usePersonaSwitch } from '../../composables/usePersonaSwitch'
+import MockInterviewConfigCard from '../../components/mock-interview/MockInterviewConfigCard.vue'
+import MockInterviewHeader from '../../components/mock-interview/MockInterviewHeader.vue'
+import MockInterviewMessageList from '../../components/mock-interview/MockInterviewMessageList.vue'
+import MockInterviewComposer from '../../components/mock-interview/MockInterviewComposer.vue'
+import MockInterviewPersonaDialog from '../../components/mock-interview/MockInterviewPersonaDialog.vue'
 
-const route = useRoute()
 const router = useRouter()
 
-// ---------- 会话状态 ----------
-const projectId = ref(route.params.projectId || null)
-const sessionId = ref(route.query.sessionId || null)
-const messages = ref([])
-const outline = ref('')
-const personaName = ref('')
-const ended = ref(false)
+// ---------- 会话编排 ----------
+const {
+  sessionId,
+  messages,
+  outline,
+  personaName,
+  ended,
+  loading,
+  starting,
+  ending,
+  personas,
+  selectedPersonaId,
+  referenceWrittenTest,
+  currentPersonaId,
+  currentPersonaName,
+  currentPersonaStyle,
+  handleStart,
+  endInterview,
+  handleInterviewEnded,
+} = useInterviewSession()
 
-// ---------- 流程状态 ----------
-const loading = ref(false) // 历史加载
-const starting = ref(false) // 开始面试
-const sending = ref(false) // 回复发送中
-const recognizing = ref(false) // STT 识别中
-const ending = ref(false) // 结束面试
-const switching = ref(false) // 换面试官
-const thinking = computed(() => sending.value && !streamingInProgress.value) // 面试官思考中
-
-// ---------- 配置状态 ----------
-const personas = ref([])
-const selectedPersonaId = ref(null)
-const referenceWrittenTest = ref(false)
-const recording = ref(false) // 是否正在按住录音（用于禁用文字输入，避免并行提交）
+// ---------- 交互状态 ----------
+const sending = ref(false) // 回复发送中（回复链路与语音链路共用）
 const textInput = ref('')
 const autoTts = ref(true)
+const messageListRef = ref(null) // 消息列表子组件（暴露 scrollToBottom）
 
-// ---------- 换面试官 ----------
-const switchDialogVisible = ref(false)
-const switchPersonaId = ref(null)
-
-const listRef = ref(null)
-
-// ---------- 流式语音状态 ----------
-const wsReady = ref(false) // WebSocket 流式识别已就绪
-const partialText = ref('') // 流式 ASR 中间识别文本
-const streamingWsBubble = ref(null) // WebSocket 流式回复中的面试官气泡
-const streamingCandidate = ref(null) // WebSocket 流式路径下乐观插入的候选人消息
-const streamingInProgress = ref(false) // 是否有流式回复气泡正在增长
-const wsBufferedChunks = [] // WS 就绪前缓存的 PCM 分片
-let voiceStream = null // WebSocket 流式控制器
-let pcmPlayer = null // 面试官语音 PCM 播放队列
-
-// ---------- 派生数据 ----------
-const currentPersonaId = computed(() => {
-  for (let i = messages.value.length - 1; i >= 0; i--) {
-    const m = messages.value[i]
-    if (m.role === 'INTERVIEWER' && m.personaId) return m.personaId
-  }
-  return null
-})
-
-const currentPersonaName = computed(() => {
-  const p = personas.value.find((x) => x.id === currentPersonaId.value)
-  return p?.name || personaName.value || '面试官'
-})
-
-const currentPersonaStyle = computed(() => {
-  const p = personas.value.find((x) => x.id === currentPersonaId.value)
-  return p?.styleConfig || null
-})
-
-// 大纲解析：后端返回 JSON 字符串，剥离可能的 markdown 代码块
-const outlineSections = computed(() => {
-  if (!outline.value) return []
-  try {
-    let obj
-    try {
-      obj = JSON.parse(outline.value)
-    } catch {
-      obj = JSON.parse(outline.value.replace(/```(json)?/g, '').trim())
-    }
-    if (!obj || typeof obj !== 'object') return []
-    const list = []
-    if (Array.isArray(obj.sections)) {
-      const labels = { TECHNICAL: '技术能力', PROJECT: '项目深挖', BEHAVIORAL: '行为面试' }
-      obj.sections.forEach((s) => {
-        list.push({
-          type: labels[s.type] || s.type || '面试环节',
-          topics: Array.isArray(s.topics) ? s.topics : [],
-        })
-      })
-    }
-    if (obj.estimatedQuestions) list.push({ type: '预计题量', topics: [`约 ${obj.estimatedQuestions} 题`] })
-    if (Array.isArray(obj.focusPoints) && obj.focusPoints.length) {
-      list.push({ type: '重点考察', topics: obj.focusPoints })
-    }
-    return list
-  } catch {
-    return []
-  }
-})
-
-// ---------- 初始化 ----------
-onMounted(async () => {
-  // 完整流程（笔试→面试）：自动勾选「引用笔试结果」
-  if (route.query.refWritten === '1' || route.query.refWritten === 'true') {
-    referenceWrittenTest.value = true
-  }
-  await loadPersonas()
-  if (sessionId.value) {
-    await loadHistory()
-  }
-})
-
-async function loadPersonas() {
-  try {
-    const res = await getPersonaList()
-    const list = res?.data || []
-    personas.value = Array.isArray(list) ? list : []
-    if (personas.value.length && !selectedPersonaId.value) {
-      const preset = personas.value.find((p) => p.isPreset) || personas.value[0]
-      selectedPersonaId.value = preset.id
-    }
-  } catch {
-    // 拦截器已提示
-  }
+// ---------- 自动滚动 ----------
+function scrollToBottom() {
+  messageListRef.value?.scrollToBottom()
 }
 
-async function loadHistory() {
-  if (!sessionId.value) return
-  loading.value = true
-  try {
-    const res = await getMockInterviewMessages(sessionId.value)
-    const list = res?.data || []
-    messages.value = Array.isArray(list) ? list : []
-    // 当前面试官：取最近一条带 personaId 的面试官消息
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      const m = messages.value[i]
-      if (m.role === 'INTERVIEWER' && m.personaId) {
-        const p = personas.value.find((x) => x.id === m.personaId)
-        if (p) personaName.value = p.name
-        break
-      }
-    }
-    ended.value = messages.value.some(
-      (m) => m.role === 'INTERVIEWER' && m.content?.startsWith('【面试结束】')
-    )
-  } catch {
-    // 拦截器已提示
-  } finally {
-    loading.value = false
-  }
+// ---------- 换面试官编排 ----------
+const {
+  switching,
+  switchDialogVisible,
+  switchPersonaId,
+  setSwitchPersonaId,
+  openSwitchDialog,
+  confirmSwitch,
+  handleSwitchSuggestion,
+} = usePersonaSwitch({
+  sessionId,
+  personas,
+  personaName,
+  messages,
+  currentPersonaId,
+  isEnded: () => ended.value,
+})
+
+// ---------- 回复编排（发消息 / 流式回复） ----------
+const reply = useInterviewReply({
+  sessionId,
+  messages,
+  textInput,
+  currentPersonaId,
+  autoTts,
+  ended,
+  sending,
+  onEnded: handleInterviewEnded,
+  // 语音实例在下方创建，这里用函数声明保证调用时已就绪
+  onSpeak: (text) => speakReply(text),
+  onReplay: (audioPath) => replayReply(audioPath),
+  onSwitchSuggestion: (id) => handleSwitchSuggestion(id),
+  onAppend: scrollToBottom,
+})
+
+// 面试官思考中（sending 且没有流式气泡在增长）
+const thinking = reply.thinking
+
+// ---------- 语音编排（WebSocket 流式 + PCM 播放 + HTTP 回退） ----------
+const {
+  partialText,
+  recording,
+  recognizing,
+  onRecStart,
+  onRecChunk,
+  onRecRecorded,
+  speak,
+  playReplay,
+  dispose: disposeVoice,
+} = useVoiceStream({
+  sessionId,
+  autoTts,
+  voiceStyle: currentPersonaStyle,
+  isSending: () => sending.value,
+  setSending: (v) => {
+    sending.value = v
+  },
+  isEnded: () => ended.value,
+  onUserText: (data) => reply.onVoiceUserText(data),
+  onAssistantText: (delta) => reply.onVoiceDelta(delta),
+  onDone: (data) => reply.finalizeVoiceReply(data),
+  onError: (msg) => ElMessage.error(msg || '流式语音出错'),
+  onSttEmpty: () => ElMessage.warning('未能识别到内容，请重新说话或改用文字输入'),
+  // WS 未就绪时的 HTTP 回退：识别成功 → 交回回复链路发送
+  submitText: (text, audioPath) => reply.sendStreaming(text, audioPath),
+})
+
+function speakReply(text) {
+  speak(text)
 }
 
-// ---------- 开始面试 ----------
-async function handleStart() {
-  if (!projectId.value) {
-    ElMessage.error('缺少项目信息，无法开始面试')
-    return
-  }
-  if (starting.value) return
-  starting.value = true
-  try {
-    const res = await startMockInterview(projectId.value, {
-      personaId: selectedPersonaId.value || null,
-      referenceWrittenTest: referenceWrittenTest.value,
-    })
-    const data = res?.data
-    if (!data?.sessionId) {
-      ElMessage.error(res?.message || '开始面试失败')
-      return
-    }
-    sessionId.value = data.sessionId
-    personaName.value = data.personaName
-    outline.value = data.outline || ''
-    messages.value = [
-      {
-        id: null,
-        role: 'INTERVIEWER',
-        content: data.openingMessage,
-        personaId: data.personaId,
-        createdAt: new Date(),
-      },
-    ]
-    // 把 sessionId 写入 URL，刷新后可恢复历史
-    router.replace({ path: `/mock-interview/${projectId.value}`, query: { sessionId: sessionId.value } })
-  } catch {
-    // 拦截器已提示
-  } finally {
-    starting.value = false
-  }
+function replayReply(audioPath) {
+  playReplay(audioPath)
 }
 
-// ---------- 发送流程 ----------
+// ---------- 发消息 ----------
 function sendText() {
   const text = textInput.value.trim()
   if (!text) {
@@ -211,518 +137,16 @@ function sendText() {
   }
   if (sending.value || recognizing.value) return
   textInput.value = ''
-  doSendStreaming(text)
+  reply.sendStreaming(text)
 }
 
-// 语音录音结束 → STT → 保存录音 → respond
-async function handleRecorded(blob) {
-  if (sending.value || recognizing.value || ended.value) return
-  recognizing.value = true
-  try {
-    // 浏览器录制多为 webm，转 wav 后上传（腾讯云 ASR 对 wav 支持最稳）
-    const wavBlob = await blobToWav(blob)
-    const res = await recognizeSpeech(wavBlob)
-    recognizing.value = false
-    const text = (res?.data || '').trim()
-    if (!text) {
-      ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
-      return
-    }
-    // 保存录音供后续回听（失败不阻断对话，仅提示）
-    let audioPath = null
-    try {
-      const up = await uploadAudio(sessionId.value, wavBlob)
-      audioPath = up?.data || null
-    } catch (e) {
-      ElMessage.warning('录音保存失败，本次回答将无语音回放')
-    }
-    doSendStreaming(text, audioPath)
-  } catch (e) {
-    recognizing.value = false
-    ElMessage.error(`语音识别失败：${e.message || '未知错误'}，请改用文字输入`)
-  }
+// 录音开始：先复位上一轮流式气泡引用，再交给语音链路建连
+function handleRecStart() {
+  reply.resetVoiceBubbles()
+  onRecStart()
 }
 
-async function doSend(text, audioPath = null) {
-  if (!sessionId.value) return
-  // 乐观插入候选人消息，即时反馈
-  const optimistic = {
-    id: null,
-    role: 'CANDIDATE',
-    content: text,
-    audioPath,
-    createdAt: new Date(),
-  }
-  messages.value.push(optimistic)
-  sending.value = true
-  try {
-    const res = await respondMockInterview(sessionId.value, { userText: text, audioPath })
-    const data = res?.data
-    if (!data?.aiMessage) {
-      ElMessage.error(res?.message || '面试官回复失败')
-      messages.value = messages.value.filter((m) => m !== optimistic)
-      return
-    }
-    // 用服务端保存的消息替换乐观消息，并追加 AI 回复
-    const idx = messages.value.indexOf(optimistic)
-    if (idx >= 0) messages.value[idx] = data.userMessage || optimistic
-    else messages.value.push(data.userMessage)
-    messages.value.push(data.aiMessage)
-
-    const aiContent = data.aiMessage.content || ''
-    if (aiContent.startsWith('【面试结束】')) {
-      ended.value = true
-      handleInterviewEnded()
-    } else if (autoTts.value) {
-      // 优先播放后端已合成保存的面试官语音；无音频时即时 TTS 合成
-      if (data.aiMessage.audioPath) {
-        playReplay(data.aiMessage.audioPath)
-      } else {
-        speak(aiContent)
-      }
-    }
-
-    // 面试官建议换人：根据回答情况推荐更合适的风格，弹窗由候选人确认
-    handleSwitchSuggestion(data.suggestedPersonaId)
-  } catch {
-    // 失败：把文本放回输入框，方便重发
-    messages.value = messages.value.filter((m) => m !== optimistic)
-    textInput.value = text
-  } finally {
-    sending.value = false
-  }
-}
-
-// ---------- 流式回复（Phase A：SSE 打字机 + 完整语音） ----------
-function beginStreamingReply() {
-  streamingInProgress.value = true
-  messages.value.push({
-    id: null,
-    role: 'INTERVIEWER',
-    content: '',
-    personaId: currentPersonaId.value,
-    createdAt: new Date(),
-    streaming: true,
-  })
-  return messages.value[messages.value.length - 1]
-}
-
-function finalizeSseReply(streamingBubble, data) {
-  streamingInProgress.value = false
-  const sidx = messages.value.indexOf(streamingBubble)
-  if (sidx >= 0 && data?.aiMessage) messages.value[sidx] = data.aiMessage
-  else if (sidx >= 0) messages.value.splice(sidx, 1)
-  const aiContent = data?.aiMessage?.content || ''
-  if (aiContent.startsWith('【面试结束】')) {
-    ended.value = true
-    handleInterviewEnded()
-  } else if (autoTts.value) {
-    if (data?.aiMessage?.audioPath) playReplay(data.aiMessage.audioPath)
-    else speak(aiContent)
-  }
-  handleSwitchSuggestion(data?.suggestedPersonaId)
-}
-
-async function doSendStreaming(text, audioPath = null) {
-  if (!sessionId.value || sending.value) return
-  const optimistic = {
-    id: null,
-    role: 'CANDIDATE',
-    content: text,
-    audioPath,
-    createdAt: new Date(),
-  }
-  messages.value.push(optimistic)
-  sending.value = true
-  const streamingBubble = beginStreamingReply()
-  let finalized = false
-
-  try {
-    await respondMockInterviewStream(sessionId.value, { userText: text, audioPath }, ({ event, data }) => {
-      if (event === 'delta') {
-        streamingBubble.content += data.text || ''
-        scrollToBottom()
-      } else if (event === 'done') {
-        finalized = true
-        const idx = messages.value.indexOf(optimistic)
-        if (idx >= 0) messages.value[idx] = data.userMessage || optimistic
-        else messages.value.push(data.userMessage)
-        finalizeSseReply(streamingBubble, data)
-      } else if (event === 'error') {
-        throw new Error(data?.message || '流式回复失败')
-      }
-    })
-    if (!finalized) throw new Error('流式回复中断')
-  } catch (e) {
-    if (finalized) {
-      ElMessage.error(`回复处理出错：${e.message || '未知错误'}`)
-    } else {
-      // 回退到非流式
-      messages.value = messages.value.filter((m) => m !== optimistic && m !== streamingBubble)
-      textInput.value = text
-      ElMessage.warning('流式回复不可用，已切换到普通模式')
-      await doSend(text, audioPath)
-    }
-  } finally {
-    sending.value = false
-  }
-}
-
-// ---------- 全链路流式语音（Phase B：WebSocket） ----------
-function ensurePcmPlayer() {
-  if (!pcmPlayer) pcmPlayer = new PcmQueuePlayer()
-  return pcmPlayer
-}
-
-function onRecStart() {
-  recording.value = true
-  wsReady.value = false
-  partialText.value = ''
-  streamingWsBubble.value = null
-  streamingCandidate.value = null
-  wsBufferedChunks.length = 0
-  const player = ensurePcmPlayer()
-  player.stop()
-  player.prime() // 在用户手势中解锁 AudioContext，避免自动播放被拦截
-  // 上一轮流式连接若未关闭，先关闭（每轮使用新连接）
-  if (voiceStream) {
-    voiceStream.close()
-    voiceStream = null
-  }
-  if (!sessionId.value || ended.value) return
-
-  const stream = createVoiceStream({
-    sessionId: sessionId.value,
-    onReady: () => {
-      wsReady.value = true
-      for (const c of wsBufferedChunks) stream.push(c)
-      wsBufferedChunks.length = 0
-    },
-    onPartial: (txt) => {
-      partialText.value = txt
-    },
-    onUserText: (data) => {
-      // 识别文本就绪即显示候选人消息（不等待 LLM 回复），并清除中间识别提示
-      partialText.value = ''
-      messages.value.push({
-        id: null,
-        role: 'CANDIDATE',
-        content: data?.text || '',
-        audioPath: data?.audioPath || null,
-        createdAt: new Date(),
-      })
-      streamingCandidate.value = messages.value[messages.value.length - 1]
-      scrollToBottom()
-    },
-    onText: (delta) => {
-      if (!streamingWsBubble.value) streamingWsBubble.value = beginStreamingReply()
-      streamingWsBubble.value.content += delta || ''
-      scrollToBottom()
-    },
-    onAudio: (int16) => {
-      if (autoTts.value) ensurePcmPlayer().enqueue(int16)
-    },
-    onDone: (data) => {
-      sending.value = false
-      finalizeWsReply(data)
-    },
-    onError: (msg) => {
-      sending.value = false
-      partialText.value = ''
-      ElMessage.error(msg || '流式语音出错')
-    },
-    onSttEmpty: () => {
-      sending.value = false
-      partialText.value = ''
-      ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
-    },
-  })
-  voiceStream = stream
-  stream.connect().catch(() => {
-    // WS 建立失败：保持 wsReady=false，回退 HTTP 路径
-    voiceStream = null
-  })
-}
-
-function onRecChunk(int16) {
-  if (wsReady.value && voiceStream) {
-    voiceStream.push(int16)
-  } else {
-    wsBufferedChunks.push(int16)
-  }
-}
-
-async function onRecRecorded(blob) {
-  recording.value = false
-  if (wsReady.value && voiceStream) {
-    // 流式模式：松开发送，后续由 WS 事件驱动
-    sending.value = true
-    voiceStream.end()
-    return
-  }
-  // 未就绪：回退 HTTP 路径（STT + 流式回复）
-  const stream = voiceStream
-  voiceStream = null
-  if (stream) stream.close()
-  await handleRecorded(blob)
-}
-
-function finalizeWsReply(data) {
-  streamingInProgress.value = false
-  const bubble = streamingWsBubble.value
-  streamingWsBubble.value = null
-  const aiMessage = data?.aiMessage || {
-    id: null,
-    role: 'INTERVIEWER',
-    content: bubble?.content || '',
-    personaId: currentPersonaId.value,
-    createdAt: new Date(),
-  }
-
-  // 候选人消息：替换 onUserText 时乐观插入的那条
-  const cand = streamingCandidate.value
-  streamingCandidate.value = null
-  if (cand && data?.userMessage) {
-    const cidx = messages.value.indexOf(cand)
-    if (cidx >= 0) messages.value[cidx] = data.userMessage
-  } else if (data?.userMessage) {
-    messages.value.push(data.userMessage)
-  }
-
-  // 面试官消息：替换流式气泡或追加
-  if (bubble) {
-    const sidx = messages.value.indexOf(bubble)
-    if (sidx >= 0) messages.value.splice(sidx, 1, aiMessage)
-    else messages.value.push(aiMessage)
-  } else {
-    messages.value.push(aiMessage)
-  }
-
-  const aiContent = aiMessage.content || ''
-  if (aiContent.startsWith('【面试结束】')) {
-    ended.value = true
-    handleInterviewEnded()
-  }
-  handleSwitchSuggestion(data?.suggestedPersonaId)
-}
-
-// ---------- 结束判定 ----------
-async function handleInterviewEnded() {
-  try {
-    await ElMessageBox.confirm('面试官已宣布面试结束，是否现在查看面试分析？', '面试结束', {
-      confirmButtonText: '查看分析',
-      cancelButtonText: '留在本页',
-      type: 'success',
-    })
-    router.push({ path: `/analysis/session/${sessionId.value}`, query: { projectId: projectId.value } })
-  } catch {
-    // 用户选择留在本页
-  }
-}
-
-// ---------- 手动结束 ----------
-async function endInterview() {
-  if (!sessionId.value || ended.value || ending.value) return
-  try {
-    await ElMessageBox.confirm('确定结束本次面试吗？系统将生成面试总结。', '结束面试', {
-      confirmButtonText: '结束面试',
-      cancelButtonText: '再想想',
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
-  ending.value = true
-  try {
-    const res = await concludeMockInterview(sessionId.value)
-    const summary = res?.data
-    if (summary?.content) messages.value.push(summary)
-    ended.value = true
-    ElMessage.success('面试已结束，总结已生成')
-    try {
-      await ElMessageBox.alert('面试总结已生成，点击查看面试分析。', '面试完成', {
-        confirmButtonText: '查看分析',
-      })
-      router.push({ path: `/analysis/session/${sessionId.value}`, query: { projectId: projectId.value } })
-    } catch {
-      // 用户关闭弹窗，留在本页
-    }
-  } catch {
-    // 拦截器已提示
-  } finally {
-    ending.value = false
-  }
-}
-
-// ---------- 换面试官 ----------
-function openSwitchDialog() {
-  if (!sessionId.value || switching.value) return
-  switchPersonaId.value = currentPersonaId.value
-  switchDialogVisible.value = true
-}
-
-async function confirmSwitch() {
-  if (!switchPersonaId.value) {
-    ElMessage.warning('请选择新的面试官风格')
-    return
-  }
-  switching.value = true
-  try {
-    await switchPersona(sessionId.value, switchPersonaId.value)
-    const p = personas.value.find((x) => x.id === switchPersonaId.value)
-    if (p) personaName.value = p.name
-    messages.value.push({
-      id: null,
-      role: 'SYSTEM',
-      content: `面试官已切换为【${personaName.value}】`,
-      createdAt: new Date(),
-    })
-    ElMessage.success('面试官已切换')
-    switchDialogVisible.value = false
-  } catch {
-    // 拦截器已提示
-  } finally {
-    switching.value = false
-  }
-}
-
-// ---------- 面试官自动建议换人（AI 依据回答情况推荐，候选人确认后切换） ----------
-async function handleSwitchSuggestion(suggestedPersonaId) {
-  if (!suggestedPersonaId || switching.value || ended.value) return
-  const p = personas.value.find((x) => x.id === suggestedPersonaId)
-  if (!p || p.id === currentPersonaId.value) return
-  try {
-    await ElMessageBox.confirm(
-      `面试官根据你的回答情况，建议切换为【${p.name}】风格继续面试，是否切换？`,
-      '面试官建议换人',
-      {
-        confirmButtonText: '切换',
-        cancelButtonText: '暂不',
-        type: 'info',
-      }
-    )
-  } catch {
-    return // 用户暂不切换
-  }
-  switching.value = true
-  try {
-    await switchPersona(sessionId.value, p.id)
-    personaName.value = p.name
-    messages.value.push({
-      id: null,
-      role: 'SYSTEM',
-      content: `面试官已切换为【${p.name}】`,
-      createdAt: new Date(),
-    })
-    ElMessage.success('已按建议切换面试官')
-  } catch {
-    // 拦截器已提示
-  } finally {
-    switching.value = false
-  }
-}
-
-// ---------- 语音播放 ----------
-let currentAudio = null
-function stopCurrentAudio() {
-  if (currentAudio) {
-    currentAudio.pause()
-    currentAudio.src = ''
-    currentAudio = null
-  }
-}
-
-async function speak(text) {
-  stopCurrentAudio()
-  const cleanText = ttsText(text)
-  if (!cleanText) return
-  let blob
-  try {
-    blob = await synthesizeSpeech(cleanText, currentPersonaStyle.value)
-  } catch (e) {
-    // 合成请求失败（网络 / 后端错误）
-    const msg = e?.response?.data?.message || e?.message || '未知错误'
-    ElMessage.error(`语音合成失败：${msg}`)
-    return
-  }
-  if (!blob || blob.size === 0) {
-    ElMessage.error('语音合成失败：音频为空')
-    return
-  }
-  const url = URL.createObjectURL(blob)
-  const audio = new Audio(url)
-  currentAudio = audio
-  audio.onended = () => {
-    URL.revokeObjectURL(url)
-    if (currentAudio === audio) currentAudio = null
-  }
-  audio.onerror = () => {
-    URL.revokeObjectURL(url)
-    if (currentAudio === audio) currentAudio = null
-    ElMessage.error('语音播放失败：音频格式可能不受支持')
-  }
-  try {
-    await audio.play()
-  } catch (e) {
-    // 浏览器自动播放策略拦截：用户点击页面后可恢复播放
-    URL.revokeObjectURL(url)
-    if (currentAudio === audio) currentAudio = null
-    const isAutoplayBlocked = e?.name === 'NotAllowedError' || /autoplay|interactive/i.test(e?.message || '')
-    if (isAutoplayBlocked) {
-      ElMessage.warning('浏览器拦截了自动朗读，请点击一下页面任意位置后重试')
-    } else {
-      ElMessage.error(`语音播放失败：${e?.message || '未知错误'}`)
-    }
-  }
-}
-
-function playReplay(audioPath) {
-  if (!audioPath) return
-  stopCurrentAudio()
-  const audio = new Audio(`/api/voice/audio/${audioPath}`)
-  currentAudio = audio
-  audio.onended = () => {
-    if (currentAudio === audio) currentAudio = null
-  }
-  audio.onerror = () => ElMessage.error('音频回放失败')
-  audio.play().catch(() => ElMessage.error('音频回放失败'))
-}
-
-// TTS 朗读前去掉结束标记
-function ttsText(content = '') {
-  return content.replace(/^【面试结束】/, '').trim()
-}
-
-// ---------- 展示辅助 ----------
-function avatarOf(msg) {
-  if (msg.role === 'CANDIDATE') return '我'
-  if (msg.personaId) {
-    const p = personas.value.find((x) => x.id === msg.personaId)
-    if (p?.name) return p.name.charAt(0)
-  }
-  return (currentPersonaName.value || '面').charAt(0)
-}
-
-function formatTime(createdAt) {
-  if (!createdAt) return ''
-  const d = new Date(createdAt)
-  if (Number.isNaN(d.getTime())) return ''
-  const hh = d.getHours().toString().padStart(2, '0')
-  const mm = d.getMinutes().toString().padStart(2, '0')
-  return `${hh}:${mm}`
-}
-
-function formatOutlineRow(content) {
-  if (!content) return ''
-  return content.replace(/^[-*•]\s*/, '')
-}
-
-// ---------- 自动滚动 ----------
-function scrollToBottom() {
-  nextTick(() => {
-    if (listRef.value) listRef.value.scrollTop = listRef.value.scrollHeight
-  })
-}
+// ---------- 滚动监听 ----------
 watch(
   () => [messages.value.length, thinking.value, recognizing.value, partialText.value],
   () => scrollToBottom(),
@@ -732,232 +156,81 @@ watch(
   () => sessionId.value,
   () => scrollToBottom()
 )
+
+/**
+ * 离开页面时释放音频/连接资源。
+ * dispose() 内部：关闭 WS、pcmPlayer.close()、stopCurrentAudio()、清空 PCM 缓冲（幂等）。
+ */
+onBeforeUnmount(() => {
+  disposeVoice()
+})
 </script>
 
 <template>
   <div class="chat-page">
     <!-- 配置卡片：无会话时显示 -->
-    <div v-if="!sessionId" class="config-wrap">
-      <div class="config-card">
-        <h2 class="config-title">AI 模拟面试</h2>
-        <p class="config-subtitle">与 AI 面试官一对一对话，支持语音回答</p>
-
-        <el-form label-width="90px" label-position="left" class="config-form">
-          <el-form-item label="面试官风格">
-            <el-select
-              v-model="selectedPersonaId"
-              placeholder="选择面试官风格"
-              style="width: 100%"
-              clearable
-            >
-              <el-option
-                v-for="p in personas"
-                :key="p.id"
-                :label="p.name"
-                :value="p.id"
-              >
-                <span>{{ p.name }}</span>
-                <span class="option-desc">{{ p.description || '' }}</span>
-              </el-option>
-              <template v-if="!personas.length">
-                <el-option value="" label="系统推荐" disabled />
-              </template>
-            </el-select>
-            <div v-if="!personas.length" class="form-tip">未获取到面试官列表，将使用系统推荐风格</div>
-          </el-form-item>
-          <el-form-item label="笔试结合">
-            <el-checkbox v-model="referenceWrittenTest">
-              引用最近一次笔试结果，针对薄弱知识点重点考察
-            </el-checkbox>
-          </el-form-item>
-        </el-form>
-
-        <div class="config-actions">
-          <el-button @click="router.back()">返回</el-button>
-          <el-button type="primary" :loading="starting" @click="handleStart">开始面试</el-button>
-        </div>
-      </div>
-    </div>
+    <MockInterviewConfigCard
+      v-if="!sessionId"
+      v-model="selectedPersonaId"
+      :personas="personas"
+      :reference-written-test="referenceWrittenTest"
+      :starting="starting"
+      @toggle-reference-written-test="referenceWrittenTest = $event"
+      @start="handleStart"
+      @back="router.back()"
+    />
 
     <!-- 聊天界面：已有会话时 -->
     <template v-else>
-      <header class="chat-header">
-        <div class="header-left">
-          <h2 class="header-title">AI 模拟面试</h2>
-          <el-tag size="small" effect="dark" type="primary">{{ currentPersonaName }}</el-tag>
-          <el-tag v-if="ended" size="small" type="success" effect="dark">已结束</el-tag>
-        </div>
-        <div class="header-right">
-          <span class="session-id" v-if="sessionId">会话 #{{ sessionId }}</span>
-        </div>
-      </header>
+      <MockInterviewHeader
+        :session-id="sessionId"
+        :persona-name="currentPersonaName"
+        :ended="ended"
+        :outline="outline"
+      />
 
-      <!-- 大纲折叠面板 -->
-      <div class="outline-wrap" v-if="outline">
-        <el-collapse class="outline-collapse">
-          <el-collapse-item>
-            <template #title>
-              <span class="outline-title">📋 本次面试大纲</span>
-            </template>
-            <div class="outline-body">
-              <template v-if="outlineSections.length">
-                <div v-for="(sec, i) in outlineSections" :key="i" class="outline-sec">
-                  <div class="outline-type">{{ sec.type }}</div>
-                  <ul class="outline-topics">
-                    <li v-for="(t, j) in sec.topics" :key="j">{{ formatOutlineRow(t) }}</li>
-                  </ul>
-                </div>
-              </template>
-              <div v-else class="outline-raw">{{ outline }}</div>
-            </div>
-          </el-collapse-item>
-        </el-collapse>
-      </div>
+      <MockInterviewMessageList
+        ref="messageListRef"
+        :messages="messages"
+        :loading="loading"
+        :thinking="thinking"
+        :ended="ended"
+        :recognizing="recognizing"
+        :partial-text="partialText"
+        :personas="personas"
+        :persona-name="currentPersonaName"
+        @speak="speak"
+        @replay="playReplay"
+      />
 
-      <!-- 消息区 -->
-      <div ref="listRef" class="message-list" v-loading="loading">
-        <template v-if="!loading">
-          <!-- 消息列表 -->
-          <div
-            v-for="(m, i) in messages"
-            :key="m.id ? m.id : `local-${i}`"
-            class="msg-row"
-            :class="{ 'msg-candidate': m.role === 'CANDIDATE' }"
-          >
-            <div v-if="m.role === 'SYSTEM'" class="system-msg">{{ m.content }}</div>
-            <template v-else-if="m.role === 'INTERVIEWER'">
-              <div class="avatar avatar-interviewer">{{ avatarOf(m) }}</div>
-              <div class="bubble-group">
-                <div
-                  class="bubble bubble-interviewer"
-                  :class="{ 'bubble-ended': m.content?.startsWith('【面试结束】') }"
-                >
-                  <div class="bubble-text">{{ m.content }}</div>
-                  <div class="bubble-meta">
-                    <span class="time">{{ formatTime(m.createdAt) }}</span>
-                    <button
-                      class="link-btn"
-                      v-if="m.content"
-                      @click="speak(m.content)"
-                      title="朗读本条回复"
-                    >
-                      🔊 朗读
-                    </button>
-                    <button
-                      class="link-btn"
-                      v-if="m.audioPath"
-                      @click="playReplay(m.audioPath)"
-                      title="回放录音"
-                    >
-                      🔊 回放
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </template>
-            <template v-else>
-              <div class="bubble-group">
-                <div class="bubble bubble-candidate">
-                  <div class="bubble-text">{{ m.content }}</div>
-                  <div class="bubble-meta meta-candidate">
-                    <span class="time">{{ formatTime(m.createdAt) }}</span>
-                    <button class="link-btn" v-if="m.audioPath" @click="playReplay(m.audioPath)">
-                      🔊 回放
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div class="avatar avatar-candidate">{{ avatarOf(m) }}</div>
-            </template>
-          </div>
-
-          <!-- 思考中动画 -->
-          <div v-if="thinking && !ended" class="msg-row">
-            <div class="avatar avatar-interviewer">{{ currentPersonaName.charAt(0) }}</div>
-            <div class="bubble bubble-interviewer thinking-bubble">
-              <span class="thinking-text">面试官正在思考</span>
-              <span class="dots">
-                <span class="dot-i" />
-                <span class="dot-i" />
-                <span class="dot-i" />
-              </span>
-            </div>
-          </div>
-
-          <!-- 实时识别中（用户说话内容的中间结果，固定在消息区展示，避免撑动输入区高度） -->
-          <div v-if="recognizing || partialText" class="msg-row msg-candidate">
-            <div class="bubble-group">
-              <div class="bubble bubble-candidate recognizing-bubble">
-                <span class="recognizing-dot" />
-                <span class="recognizing-text">{{ partialText || '正在识别…' }}</span>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
-
-      <!-- 输入区 -->
-      <footer class="input-area" :class="{ disabled: ended }">
-        <div v-if="ended" class="ended-banner">面试已结束，感谢参与</div>
-        <div class="input-row">
-          <AudioRecorder
-            :class="{ 'input-disabled': sending || recognizing || ended }"
-            @start="onRecStart"
-            @chunk="onRecChunk"
-            @recorded="onRecRecorded"
-          />
-          <el-input
-            v-model="textInput"
-            class="text-input"
-            type="textarea"
-            :rows="1"
-            :autosize="{ minRows: 1, maxRows: 4 }"
-            resize="none"
-            placeholder="输入你的回答（Shift+Enter 换行），或按住左侧按钮说话…"
-            :disabled="sending || recognizing || recording || ended"
-            @keyup.enter.exact.prevent="sendText"
-          />
-          <el-button
-            type="primary"
-            :loading="sending"
-            :disabled="recognizing || recording || ended"
-            @click="sendText"
-          >
-            发送
-          </el-button>
-        </div>
-        <div class="tool-row">
-          <el-switch
-            v-model="autoTts"
-            size="small"
-            active-text="自动朗读面试官回复"
-            :disabled="ended"
-          />
-          <div class="tool-spacer" />
-          <el-button size="small" @click="openSwitchDialog" :disabled="!sessionId || ended">
-            换面试官
-          </el-button>
-          <el-button size="small" type="danger" plain :disabled="!sessionId || ended" :loading="ending" @click="endInterview">
-            结束面试
-          </el-button>
-        </div>
-      </footer>
+      <MockInterviewComposer
+        v-model="textInput"
+        :auto-tts="autoTts"
+        :sending="sending"
+        :recognizing="recognizing"
+        :recording="recording"
+        :ended="ended"
+        :ending="ending"
+        :session-id="sessionId"
+        @toggle-auto-tts="autoTts = $event"
+        @send="sendText"
+        @record-start="handleRecStart"
+        @record-chunk="onRecChunk"
+        @record-recorded="onRecRecorded"
+        @switch-persona="openSwitchDialog"
+        @end="endInterview"
+      />
     </template>
 
     <!-- 换面试官弹窗 -->
-    <el-dialog v-model="switchDialogVisible" title="切换面试官" width="420px">
-      <p class="dialog-tip">切换后，后续提问将按新面试官的风格进行。</p>
-      <el-select v-model="switchPersonaId" placeholder="选择新的面试官风格" style="width: 100%">
-        <el-option v-for="p in personas" :key="p.id" :label="p.name" :value="p.id">
-          <span>{{ p.name }}</span>
-          <span class="option-desc">{{ p.description || '' }}</span>
-        </el-option>
-      </el-select>
-      <template #footer>
-        <el-button @click="switchDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="switching" @click="confirmSwitch">确认切换</el-button>
-      </template>
-    </el-dialog>
+    <MockInterviewPersonaDialog
+      v-model:visible="switchDialogVisible"
+      :personas="personas"
+      :persona-id="switchPersonaId"
+      :switching="switching"
+      @change-persona="setSwitchPersonaId"
+      @confirm="confirmSwitch"
+    />
   </div>
 </template>
 
@@ -970,342 +243,5 @@ watch(
   flex-direction: column;
   background: #f5f7fa;
   overflow: hidden;
-}
-
-/* ---------- 配置卡片 ---------- */
-.config-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.config-card {
-  width: 520px;
-  background: #fff;
-  border-radius: 12px;
-  padding: 36px 36px 28px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-}
-.config-title {
-  margin: 0 0 8px;
-  font-size: 22px;
-  text-align: center;
-}
-.config-subtitle {
-  margin: 0 0 28px;
-  text-align: center;
-  color: #909399;
-  font-size: 13px;
-}
-.config-form {
-  margin-bottom: 8px;
-}
-.form-tip {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 6px;
-}
-.config-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-}
-.option-desc {
-  float: right;
-  font-size: 12px;
-  color: #909399;
-  margin-left: 16px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---------- 头部 ---------- */
-.chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-  flex-shrink: 0;
-}
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.header-title {
-  margin: 0;
-  font-size: 17px;
-}
-.header-right .session-id {
-  font-size: 12px;
-  color: #909399;
-}
-
-/* ---------- 大纲 ---------- */
-.outline-wrap {
-  flex-shrink: 0;
-  background: #fff;
-  border-bottom: 1px solid #ebeef5;
-}
-.outline-collapse {
-  border: none;
-}
-.outline-collapse :deep(.el-collapse-item__header) {
-  background: transparent;
-  height: 40px;
-  padding-left: 20px;
-}
-.outline-title {
-  font-weight: 600;
-  color: #303133;
-}
-.outline-body {
-  padding: 4px 24px 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.outline-sec {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 200px;
-  background: #fafbfc;
-}
-.outline-type {
-  font-weight: 600;
-  font-size: 13px;
-  color: #409eff;
-  margin-bottom: 4px;
-}
-.outline-topics {
-  margin: 0;
-  padding-left: 18px;
-  font-size: 12px;
-  color: #606266;
-}
-.outline-raw {
-  font-size: 12px;
-  color: #606266;
-  white-space: pre-wrap;
-  width: 100%;
-}
-
-/* ---------- 消息区 ---------- */
-.message-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.msg-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  width: 100%;
-}
-.msg-candidate {
-  justify-content: flex-end;
-}
-.avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 600;
-  color: #fff;
-  flex-shrink: 0;
-}
-.avatar-interviewer {
-  background: #303133;
-}
-.avatar-candidate {
-  background: #409eff;
-}
-.bubble-group {
-  max-width: 72%;
-  display: flex;
-  flex-direction: column;
-}
-.bubble {
-  border-radius: 12px;
-  padding: 10px 14px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-.bubble-interviewer {
-  background: #fff;
-  border-top-left-radius: 4px;
-}
-.bubble-candidate {
-  background: #e8f3ff;
-  border-top-right-radius: 4px;
-  align-self: flex-end;
-}
-.bubble-ended {
-  border: 1px solid #67c23a;
-  background: #f0f9eb;
-}
-.bubble-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-  font-size: 14px;
-}
-.bubble-meta {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.meta-candidate {
-  justify-content: flex-end;
-}
-.time {
-  font-size: 11px;
-  color: #b0b3b8;
-}
-.link-btn {
-  border: none;
-  background: transparent;
-  color: #409eff;
-  font-size: 12px;
-  cursor: pointer;
-  padding: 0;
-}
-.link-btn:hover {
-  text-decoration: underline;
-}
-.system-msg {
-  margin: 0 auto;
-  background: rgba(0, 0, 0, 0.04);
-  color: #909399;
-  font-size: 12px;
-  padding: 4px 14px;
-  border-radius: 999px;
-  max-width: 80%;
-  text-align: center;
-}
-
-/* 思考中动画 */
-.thinking-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.thinking-text {
-  font-size: 13px;
-  color: #909399;
-}
-.dots {
-  display: inline-flex;
-  gap: 3px;
-}
-.dot-i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #909399;
-  animation: bounce 1.2s infinite ease-in-out;
-}
-.dot-i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.dot-i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.5;
-  }
-  40% {
-    transform: translateY(-4px);
-    opacity: 1;
-  }
-}
-
-/* ---------- 输入区 ---------- */
-.input-area {
-  flex-shrink: 0;
-  background: #fff;
-  border-top: 1px solid #ebeef5;
-  padding: 10px 16px 12px;
-  position: relative;
-}
-.ended-banner {
-  text-align: center;
-  color: #67c23a;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.input-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.text-input {
-  flex: 1;
-}
-.input-disabled {
-  opacity: 0.5;
-  pointer-events: none;
-}
-.recognizing-bubble {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  opacity: 0.9;
-}
-.recognizing-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #409eff;
-  animation: recognizing-pulse 1s ease-in-out infinite;
-  flex-shrink: 0;
-}
-.recognizing-text {
-  font-size: 13px;
-  color: #606266;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 55vw;
-}
-@keyframes recognizing-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-.tool-row {
-  margin-top: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.tool-spacer {
-  flex: 1;
-}
-.dialog-tip {
-  margin: 0 0 12px;
-  color: #909399;
-  font-size: 13px;
 }
 </style>

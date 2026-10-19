@@ -1,7 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { getHistoryAnalysis, getHistoryStatus, refreshHistoryAnalysis } from '../../api/analysis'
 import { ArrowLeft } from '@element-plus/icons-vue'
 

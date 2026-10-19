@@ -1,6 +1,5 @@
 <script setup>
 import { ref, computed, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
 import { PcmRecorder } from '../utils/pcmRecorder'
 
 /**
@@ -109,18 +108,38 @@ function stopRecording() {
   }
   state.value = 'idle'
   emit('stop')
+
+  let wavBlob = null
+  let failed = false
   try {
-    const wavBlob = recorder.getWavBlob()
-    recorder.stop()
-    recorder = null
-    if (!unmounted && wavBlob && wavBlob.size > 44) {
-      emit('recorded', wavBlob)
-    }
+    wavBlob = recorder.getWavBlob()
   } catch (e) {
-    recorder = null
+    failed = true
+  }
+  // 无论取 blob 是否成功，都必须释放麦克风轨道
+  try {
+    recorder.stop()
+  } catch (e) {
+    failed = true
+  }
+  recorder = null
+
+  // 关键：任何结束路径都必须发 recorded（异常时发 null）。
+  // 否则父组件的 recording 状态会永久卡在 true，把输入框和发送按钮锁死，
+  // 用户只能刷新页面才能恢复。
+  if (failed) {
     ElMessage.error('录音结束处理失败，请重试或改用文字输入')
     emit('error', 'recorder-error')
+    if (!unmounted) emit('recorded', null)
+    return
   }
+  if (!wavBlob || wavBlob.size <= 44) {
+    // 录音时长过短（仅 WAV 头，无音频帧）：提示后同样要复位状态
+    ElMessage.warning('录音时长过短，请按住按钮说完后再松开')
+    if (!unmounted) emit('recorded', null)
+    return
+  }
+  if (!unmounted) emit('recorded', wavBlob)
 }
 
 function cleanup() {
