@@ -496,10 +496,11 @@ onBeforeUnmount(() => {
         <el-form-item label="语音供应商">
           <el-radio-group v-model="voiceProvider">
             <el-radio-button value="tencent">腾讯云 API</el-radio-button>
-            <el-radio-button value="local_qwen">本地 Qwen3-TTS</el-radio-button>
+            <el-radio-button value="local_qwen">本地 Qwen（TTS+ASR）</el-radio-button>
           </el-radio-group>
           <div class="hint">
-            本地模式免密钥、无调用费用。后端启动时若供应商是本地 Qwen，会<strong>自动拉起</strong>
+            本地模式免密钥、无调用费用：Qwen3-TTS 负责面试官朗读，Qwen3-ASR 负责识别你的回答，
+            两张模型跑在同一个 voice-service 进程里。后端启动时若供应商是本地 Qwen，会<strong>自动拉起</strong>
             voice-service；后端关闭时同步结束（只结束由后端拉起的那一个，手工启动的实例不会被误杀）。
           </div>
         </el-form-item>
@@ -540,15 +541,35 @@ onBeforeUnmount(() => {
               无法连通 {{ localHealth.baseUrl || localVoiceUrl }}：{{ localHealth.error || '服务未启动' }}
             </div>
             <div v-else>
-              已连通 · 模型 <strong>{{ localHealth.model }}</strong> ·
+              已连通 · TTS <strong>{{ localHealth.model }}</strong> ·
               {{ localHealth.loaded ? '已加载' : '加载中' }} ·
               运行在 {{ localHealth.device }}
               <span v-if="localHealth.speakers?.length">· 音色：{{ localHealth.speakers.join(' / ') }}</span>
               <span v-if="localHealth.loadError">· 加载错误：{{ localHealth.loadError }}</span>
+              <div v-if="localHealth.asrEnabled" style="margin-top: 4px">
+                ASR <strong>{{ localHealth.asrModel }}</strong> ·
+                {{ localHealth.asrLoaded ? '已加载' : '加载中' }} ·
+                运行在 {{ localHealth.asrDevice }}
+                <span v-if="localHealth.asrLanguage">· 语种：{{ localHealth.asrLanguage }}</span>
+                <span v-else>· 语种：自动检测</span>
+                <span v-if="localHealth.asrLoadError" class="error-hint">
+                  · 识别加载错误：{{ localHealth.asrLoadError }}
+                </span>
+              </div>
+              <div v-else>ASR：本机已关闭本地识别（app.voice.local.asr.enabled=false）</div>
             </div>
           </el-alert>
-          <el-alert type="info" :closable="false" style="margin-bottom: 12px">
-            当前阶段 TTS 走本地 Qwen，<strong>ASR（语音识别）仍走腾讯云</strong>，因此下面仍需保留腾讯云密钥。
+          <el-alert
+            v-if="localHealth?.reachable && localHealth?.asrEnabled === false"
+            type="warning"
+            :closable="false"
+            style="margin-bottom: 12px"
+          >
+            本地识别已关闭：<strong>ASR（语音识别）仍走腾讯云</strong>，因此下面仍需保留腾讯云密钥。
+          </el-alert>
+          <el-alert v-else type="success" :closable="false" style="margin-bottom: 12px">
+            TTS 与 ASR <strong>都走本地 Qwen</strong>，无需腾讯云密钥。下面的腾讯云配置仅在关闭本地识别、
+            或本地服务异常触发回退时才会用到。
           </el-alert>
           <el-form-item v-if="localProcess?.logs?.length" label="最近日志">
             <el-collapse class="voice-log-collapse">
@@ -595,14 +616,14 @@ onBeforeUnmount(() => {
           <el-tag v-else-if="voiceConfigured" type="success" size="small" effect="dark">已配置</el-tag>
           <el-tag v-else type="warning" size="small" effect="plain">未配置</el-tag>
           <span class="hint" v-if="voiceProvider === 'local_qwen'">
-            TTS 使用本地 Qwen（{{ localVoiceUrl }}），腾讯云密钥仅用于语音识别。
+            TTS 与 ASR 均由本地 Qwen 提供，腾讯云配置可留空。
           </span>
           <span class="hint" v-else-if="voiceConfigured === false">
             请在下方填写腾讯云密钥并保存，或通过后端环境变量 TENCENT_SECRET_ID / TENCENT_SECRET_KEY 配置。
           </span>
           <span class="hint" v-else>STT / TTS 均由腾讯云提供。</span>
         </div>
-        <div class="hint" v-if="voiceConfigured && !appIdConfigured">
+        <div class="hint" v-if="voiceConfigured && !appIdConfigured && voiceProvider !== 'local_qwen'">
           提示：未配置 AppId，实时语音识别（WebSocket 流式）不可用，一句话识别不受影响。
         </div>
         <div class="hint">
