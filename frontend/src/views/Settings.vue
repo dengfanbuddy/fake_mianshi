@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { PcmRecorder } from '../utils/pcmRecorder'
 import { getAiConfigs, saveAiConfig, setActiveAiConfig } from '../api/ai-config'
 import {
   getPersonaList,
@@ -154,6 +155,59 @@ const localProcessTagType = computed(() => {
   if (localHealth.value?.reachable) return 'info'
   return 'warning'
 })
+
+/* ---------------- 麦克风自检 ---------------- */
+// 存在的意义：识别失败最常见的原因不是模型，而是麦克风根本没送数据（录到的 wav 精确全零）。
+// 这个自检把「麦克风问题」和「识别不准」区分开，用户不必靠猜。
+const micTesting = ref(false)
+const micPeak = ref(0)
+const micTestResult = ref(null) // null | { type, text }
+let micTestRecorder = null
+
+async function testMic() {
+  if (micTesting.value) return
+  if (!navigator.mediaDevices?.getUserMedia) {
+    ElMessage.warning('当前浏览器不支持录音')
+    return
+  }
+  micTesting.value = true
+  micPeak.value = 0
+  micTestResult.value = null
+  try {
+    micTestRecorder = new PcmRecorder({
+      onLevel: (v) => {
+        if (v > micPeak.value) micPeak.value = v
+      },
+    })
+    // 只要 start() 没抛异常就说明麦克风被成功打开了（静音会被探测逻辑标记）
+    await micTestRecorder.start()
+    micTestRecorder.resume()
+    ElMessage.info('请对着麦克风说一句话…')
+    await new Promise((r) => setTimeout(r, 2000))
+    const peak = micPeak.value
+    if (peak <= 0) {
+      micTestResult.value = {
+        type: 'danger',
+        text: '麦克风没有输出任何声音（全零）。检查输入设备、静音键、系统麦克风权限',
+      }
+    } else if (peak < 0.05) {
+      micTestResult.value = { type: 'warning', text: `电平偏低（${Math.round(peak * 100)}%），靠近麦克风或调高输入音量` }
+    } else {
+      micTestResult.value = { type: 'success', text: `麦克风正常（电平 ${Math.round(peak * 100)}%）` }
+    }
+  } catch (e) {
+    micTestResult.value = {
+      type: 'danger',
+      text: `无法打开麦克风：${e?.name === 'NotAllowedError' ? '权限被拒绝' : e?.message || '未知错误'}`,
+    }
+  } finally {
+    if (micTestRecorder) {
+      try { micTestRecorder.stop() } catch { /* ignore */ }
+      micTestRecorder = null
+    }
+    micTesting.value = false
+  }
+}
 
 /* ---------------- 腾讯云语音配置状态 ---------------- */
 const voiceConfigured = ref(null) // null=加载中, true/false
@@ -455,6 +509,10 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   // 离开页面必须停掉轮询，否则定时器会一直跑
   stopLocalPolling()
+  if (micTestRecorder) {
+    try { micTestRecorder.stop() } catch { /* ignore */ }
+    micTestRecorder = null
+  }
 })
 </script>
 
@@ -544,6 +602,17 @@ onBeforeUnmount(() => {
             <el-button :loading="localTesting" style="margin-left: 12px" @click="testLocalVoice">
               测试连通
             </el-button>
+          </el-form-item>
+          <el-form-item label="麦克风自检">
+            <el-button :loading="micTesting" @click="testMic">检测 2 秒</el-button>
+            <el-tag v-if="micTestResult" :type="micTestResult.type" style="margin-left: 12px">
+              {{ micTestResult.text }}
+            </el-tag>
+            <div class="hint">
+              「识别不出内容」最常见的原因其实是<strong>麦克风没送数据</strong>（录到的音频精确全零）。
+              点检测后说一句话，这里会报峰值电平，用来区分「麦克风问题」和「识别不准」。
+              录音时按钮下方也有实时电平条，条不动就是没采到声音。
+            </div>
           </el-form-item>
           <el-form-item label="识别热词">
             <el-input

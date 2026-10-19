@@ -115,7 +115,8 @@ const {
   onAssistantText: (delta) => reply.onVoiceDelta(delta),
   onDone: (data) => reply.finalizeVoiceReply(data),
   onError: (msg) => ElMessage.error(msg || '流式语音出错'),
-  onSttEmpty: () => ElMessage.warning('未能识别到内容，请重新说话或改用文字输入'),
+  onSttEmpty: () =>
+    ElMessage.warning('没有识别到内容：可能没说话、声音太小，或麦克风没采到声音（设置页可做麦克风自检）'),
   // WS 未就绪时的 HTTP 回退：识别成功 → 交回回复链路发送
   submitText: (text, audioPath) => reply.sendStreaming(text, audioPath),
 })

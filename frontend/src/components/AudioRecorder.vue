@@ -14,6 +14,10 @@ const MAX_DURATION = 120 // 秒
 
 const state = ref('idle') // idle | recording
 const seconds = ref(0)
+/** 实时电平（0~1），用于让用户一眼看出麦克风到底有没有在送数据 */
+const level = ref(0)
+/** 本次录音是否全程没有采集到任何非零样本 */
+const micSilent = ref(false)
 
 let recorder = null
 let timer = null
@@ -46,6 +50,8 @@ async function startRecording() {
   }
   pending = true
   try {
+    micSilent.value = false
+    level.value = 0
     recorder = new PcmRecorder({
       onChunk: (int16) => {
         emit('chunk', int16)
@@ -53,6 +59,20 @@ async function startRecording() {
       onError: (e) => {
         ElMessage.warning(`录音出错：${e?.message || '未知错误'}`)
         emit('error', 'recorder-error')
+      },
+      onLevel: (v) => {
+        level.value = v
+      },
+      // 探测不到任何非零样本：必须明确告诉用户是"麦克风没数据"，而不是事后说"未识别到内容"
+      onSilent: (kind) => {
+        micSilent.value = true
+        if (kind === 'switched') {
+          ElMessage.warning('当前设备在 16k 模式下拿不到声音，已自动切换录音方式继续')
+        } else {
+          ElMessage.error(
+            '麦克风没有采集到任何声音。请检查：①系统输入设备是否选对 ②麦克风是否被静音 ③Windows「隐私和安全性 → 麦克风」是否允许浏览器访问'
+          )
+        }
       },
     })
     await recorder.start()
@@ -75,6 +95,8 @@ async function startRecording() {
       }
     }, 500)
     emit('start')
+    // 探测阶段攒下的音频在这里补发：必须晚于 emit('start')，否则父组件的流式连接还没建好
+    recorder.resume()
   } catch (e) {
     pending = false
     stopRequested = false
@@ -107,6 +129,7 @@ function stopRecording() {
     timer = null
   }
   state.value = 'idle'
+  level.value = 0
   emit('stop')
 
   let wavBlob = null
@@ -184,8 +207,13 @@ onBeforeUnmount(() => {
       </svg>
       <span v-if="isRecording" class="time">{{ displayTime }}</span>
     </button>
-    <span class="hint" :class="{ recording: isRecording }">
-      {{ isRecording ? '松开结束' : '按住说话' }}
+    <!-- 录音时显示实时电平：麦克风全零时这里是空的，用户一眼就能看出问题 -->
+    <div v-if="isRecording" class="level" :class="{ silent: micSilent }">
+      <span :style="{ width: `${Math.round(level * 100)}%` }" />
+    </div>
+    <span class="hint" :class="{ recording: isRecording, silent: isRecording && micSilent }">
+      <template v-if="isRecording && micSilent">未检测到麦克风输入</template>
+      <template v-else>{{ isRecording ? '松开结束' : '按住说话' }}</template>
     </span>
   </div>
 </template>
@@ -248,6 +276,26 @@ onBeforeUnmount(() => {
 .hint.recording {
   color: #f56c6c;
   font-weight: 600;
+}
+.hint.silent {
+  color: #e6a23c;
+}
+.level {
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: #ebeef5;
+  overflow: hidden;
+}
+.level > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: #67c23a;
+  transition: width 0.08s linear;
+}
+.level.silent > span {
+  background: #e6a23c;
 }
 @keyframes pulse {
   0% {

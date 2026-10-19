@@ -116,7 +116,7 @@ export function useVoiceStream(options = {}) {
         setSending(false)
         partialText.value = ''
         if (onSttEmpty) onSttEmpty()
-        else ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
+        else ElMessage.warning('没有识别到内容：可能没说话、声音太小，或麦克风没采到声音（设置页可做麦克风自检）')
       },
     })
     voiceStream = stream
@@ -163,7 +163,9 @@ export function useVoiceStream(options = {}) {
       recognizing.value = false
       const text = (res?.data || '').trim()
       if (!text) {
-        ElMessage.warning('未能识别到内容，请重新说话或改用文字输入')
+        ElMessage.warning(
+          '没有识别到内容：可能没说话、声音太小，或麦克风没采到声音（设置页可做麦克风自检）'
+        )
         return
       }
       // 保存录音供后续回听（失败不阻断对话，仅提示）
