@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.lang.NonNull;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.config.annotation.PathMatchConfigurer;
@@ -37,6 +38,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/**")
                 .addResourceLocations("classpath:/static/")
+                // 一律要求浏览器回源校验：文件带 Last-Modified，命中时得到 304，代价很小。
+                // 不加的话 index.html 会被按启发式规则缓存住——升级发布包后用户看到的还是旧页面，
+                // 而旧页面的 index-<hash>.js 已被镜像删除，表现为白屏或功能诡异。
+                .setCacheControl(CacheControl.noCache())
                 .resourceChain(true)
                 .addResolver(new PathResourceResolver() {
                     @Override
@@ -46,11 +51,18 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         if (requested.exists() && requested.isReadable()) {
                             return requested;
                         }
-                        // 未知的 /api/* 保持 404 语义；其余路径回退到 SPA 入口（history 模式深链接/刷新）
-                        if (!resourcePath.startsWith("api/")) {
-                            return new ClassPathResource("static/index.html");
+                        // 未知的 /api/* 保持 404 语义
+                        if (resourcePath.startsWith("api/")) {
+                            return null;
                         }
-                        return null;
+                        // 构建产物缺失必须 404，绝不能回退成 index.html：浏览器把 HTML 当模块脚本
+                        // 加载会报 "Unexpected token '<'"，比 404 难排查得多。
+                        // （常见于升级后浏览器仍请求上一版的 assets/xxx-<hash>.js）
+                        if (resourcePath.startsWith("assets/")) {
+                            return null;
+                        }
+                        // 其余路径回退到 SPA 入口（history 模式深链接/刷新）
+                        return new ClassPathResource("static/index.html");
                     }
                 });
     }
