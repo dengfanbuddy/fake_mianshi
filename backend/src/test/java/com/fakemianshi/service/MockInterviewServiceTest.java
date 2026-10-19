@@ -386,4 +386,62 @@ class MockInterviewServiceTest {
     void switchPersona_shouldThrowBusinessException_whenSessionNotFound() {
         assertThrows(BusinessException.class, () -> service.switchPersona(999L, 1L));
     }
+
+    // ---------- 面试官风格进提示词 ----------
+
+    /** 抓出某一轮发给 LLM 的 system prompt */
+    private String systemPromptOf(InterviewerPersona persona) {
+        when(personaService.findById(1L)).thenReturn(persona);
+        service.start(1L, new MockInterviewStartRequest());
+        MockInterviewRespondRequest req = new MockInterviewRespondRequest();
+        req.setUserText("回答");
+        service.respond(1L, req);
+
+        ArgumentCaptor<List<LlmService.Message>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmService, org.mockito.Mockito.atLeastOnce()).chat(captor.capture());
+        return captor.getValue().get(0).content();
+    }
+
+    @Test
+    void respond_shouldPutStyleConfigIntoSystemPrompt() {
+        InterviewerPersona persona = new InterviewerPersona();
+        persona.setId(1L);
+        persona.setName("技术深挖型");
+        persona.setStyleConfig("{\"tone\":\"serious\",\"speed\":\"medium\","
+                + "\"aggressiveness\":0.8,\"followupStrategy\":\"deep_dive\"}");
+
+        String prompt = systemPromptOf(persona);
+
+        // 追问策略与语气一直生效
+        assertTrue(prompt.contains("追问策略：不断追问底层原理"), "缺少追问策略");
+        assertTrue(prompt.contains("语气：冷静克制"), "缺少语气");
+        // aggressiveness 以前只进 TTS 的 instruct（0.6B 会丢弃），现在必须真的进提示词
+        assertTrue(prompt.contains("追问强度：高压"), "aggressiveness 没有进提示词");
+    }
+
+    @Test
+    void respond_shouldReflectDifferentAggressivenessInSystemPrompt() {
+        InterviewerPersona harsh = new InterviewerPersona();
+        harsh.setId(1L);
+        harsh.setName("压力面试型");
+        harsh.setStyleConfig("{\"tone\":\"stern\",\"aggressiveness\":0.9}");
+        assertTrue(systemPromptOf(harsh).contains("追问强度：高压"));
+
+        // 同一套流程换成温和人设，提示词必须跟着变（否则这个字段还是摆设）
+        resetSessionState();
+        InterviewerPersona mild = new InterviewerPersona();
+        mild.setId(1L);
+        mild.setName("温和引导型");
+        mild.setStyleConfig("{\"tone\":\"warm\",\"aggressiveness\":0.2}");
+        String mildPrompt = systemPromptOf(mild);
+        assertTrue(mildPrompt.contains("追问强度：温和"), mildPrompt);
+        assertTrue(mildPrompt.contains("语气：温和鼓励"), mildPrompt);
+    }
+
+    /** 每轮测试都在累积消息，第二次调用前先清空，模拟新一轮会话 */
+    private void resetSessionState() {
+        messages.clear();
+        sessions.clear();
+        sessionIdGen.set(1);
+    }
 }

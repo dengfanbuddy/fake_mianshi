@@ -22,6 +22,7 @@ import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.VoiceService;
 import com.fakemianshi.util.AudioStorageUtil;
+import com.fakemianshi.util.PersonaStyleText;
 import com.fakemianshi.util.SentenceSplitter;
 import com.fakemianshi.util.SpokenTextUtil;
 import com.fakemianshi.util.WavAudio;
@@ -612,34 +613,12 @@ public class MockInterviewServiceImpl implements MockInterviewService {
     }
 
     /**
-     * 解析人设 styleConfig（JSON），提取追问策略与语气，转成 prompt 友好的文字描述。
+     * 解析人设 styleConfig（JSON），提取追问策略、语气与追问强度，转成 prompt 友好的文字描述。
+     *
+     * <p>具体映射见 {@link PersonaStyleText}——放在那里是为了能单独回归（改了面试官脾气必须可测）。
      */
     private String buildPersonaStyleText(InterviewerPersona persona) {
-        String styleConfig = persona.getStyleConfig();
-        if (styleConfig == null || styleConfig.isBlank()) {
-            return "";
-        }
-        try {
-            JsonNode node = OBJECT_MAPPER.readTree(styleConfig);
-            String followup = node.path("followupStrategy").asText("");
-            String tone = node.path("tone").asText("");
-            String followupDesc = switch (followup) {
-                case "deep_dive" -> "不断追问底层原理和实现细节，刨根问底到源码级别";
-                case "challenge" -> "质疑回答、施加压力，重点考察抗压能力";
-                case "guide" -> "友好引导，答不上来时给提示并换角度提问";
-                case "project_drill" -> "围绕简历项目深挖架构决策、踩坑经验与技术选型理由";
-                case "checklist" -> "按知识点清单逐个考察，不追问过深";
-                default -> followup.isBlank() ? "根据回答动态深挖" : followup;
-            };
-            StringBuilder sb = new StringBuilder("追问策略：").append(followupDesc);
-            if (!tone.isBlank()) {
-                sb.append("；语气：").append(tone);
-            }
-            return sb.toString();
-        } catch (JacksonException e) {
-            // styleConfig 非 JSON 时降级为通用策略
-            return "追问策略：根据回答动态深挖";
-        }
+        return PersonaStyleText.toPromptText(persona.getStyleConfig());
     }
 
     /**
