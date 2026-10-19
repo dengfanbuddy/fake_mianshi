@@ -287,13 +287,40 @@ public class LocalQwenVoiceService implements VoiceService {
         }
         try (InputStream in = response.body()) {
             byte[] buf = new byte[4096];
+            // InputStream.read 可能返回任意长度，甚至奇数字节。奇数长度的分片意味着
+            // 一个 16bit 样本被劈成两半：前端拼不回就会让之后所有样本错位一字节
+            // （int16 被解释成噪声，听起来是刺耳白噪音），所以这里把半个样本留到下一块。
+            int leftover = -1;
             int n;
             while ((n = in.read(buf)) != -1) {
-                if (n > 0) {
-                    byte[] chunk = new byte[n];
-                    System.arraycopy(buf, 0, chunk, 0, n);
-                    onPcmChunk.accept(chunk);
+                if (n <= 0) {
+                    continue;
                 }
+                byte[] chunk;
+                int len;
+                if (leftover >= 0) {
+                    len = n + 1;
+                    chunk = new byte[len];
+                    chunk[0] = (byte) leftover;
+                    System.arraycopy(buf, 0, chunk, 1, n);
+                    leftover = -1;
+                } else {
+                    len = n;
+                    chunk = new byte[len];
+                    System.arraycopy(buf, 0, chunk, 0, n);
+                }
+                if ((len & 1) != 0) {
+                    leftover = chunk[len - 1] & 0xFF;
+                    len--;
+                }
+                if (len > 0) {
+                    byte[] aligned = (len == chunk.length) ? chunk : java.util.Arrays.copyOf(chunk, len);
+                    onPcmChunk.accept(aligned);
+                }
+            }
+            if (leftover >= 0) {
+                // 整个流出现半个样本：音频本身已经损坏，丢掉这半字节比发出去更安全
+                log.warn("流式语音末块残留半个样本（1 字节），已丢弃");
             }
         } catch (IOException e) {
             throw new BusinessException("本地流式语音合成响应读取失败: " + e.getMessage(), e);

@@ -41,7 +41,26 @@
 
 ## 面试官风格 (Interviewer Persona)
 
-模拟面试中 AI 面试官的人设风格。影响对话措辞、追问策略、以及 TTS 语音表现（语气、语速等）。
+模拟面试中 AI 面试官的人设风格。**分两个互不相通的层面**：
+
+1. **说什么（LLM 提示词）** —— 只由 `name` + `description` 决定，会拼进面试官提示词。
+2. **怎么念（TTS）** —— 只由 `styleConfig` 决定，翻译成 `speaker`（音色）+ `instruct`（自然语言风格指令）。
+
+`styleConfig` 字段与**当前真实生效情况**（务必先看这张表再改）：
+
+| 字段 | 取值 | 0.6B CustomVoice | 1.7B CustomVoice |
+|---|---|---|---|
+| `qwenVoice` | 9 个预置音色 | ✅ 生效 | ✅ 生效 |
+| `tone` | serious/stern/warm/professional/neutral | 仅决定音色（→ `speaker`） | 音色 + 语气指令 |
+| `qwenLanguage` | Chinese/English | ✅ 生效 | ✅ 生效 |
+| `speed` | slow/medium/fast | ❌ 无效 | ✅ 生效 |
+| `aggressiveness` | 0~1 | ❌ 无效 | ✅ 生效（≥0.8 追加「追问犀利」） |
+| `qwenInstruct` | 任意文本 | ❌ 无效 | ✅ 生效 |
+| `followupStrategy` | deep_dive/challenge/guide/... | ❌ 未接任何代码 | ❌ 未接任何代码 |
+
+> ❌ 的根因：`faster_qwen3_tts` 在 `model.py` 里对 `tts_model_size == "0b6"` 直接 `instruct = None`，
+> 所以 0.6B 权重收不到任何风格指令。要真正用自然语言控制语气/语速，必须换 1.7B 权重
+> （`Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice`，约 3.5 GB）。
 
 - **预设 + 自定义**：系统预设若干风格模板，用户可手动新增自定义风格
 - **选择方式**：手动选择 / 随机分配 / 智能推荐（用户不选时默认推荐）
@@ -62,6 +81,19 @@
   - **流畅度**：基于 STT 文本推断（停顿、语气词频率、语速、重复等）
   - **语气/情绪**：MVP 阶段基于文本内容由 LLM 推断（用词、句式等），后续可扩展音频信号分析增强
 - **录音保存**：用户语音录音**保存**，用于回放复盘。音频文件存储于文件系统，数据库仅存路径引用。
+
+### 音频链路不变量（踩过的坑）
+
+- **AudioContext 的采样率必须等于 PCM 数据的采样率**。`PcmQueuePlayer` 早期用
+  `new AudioContext()`（设备默认 48k/44.1kHz）承载 16k 的 AudioBuffer，浏览器会对**每个缓冲
+  分别**做采样率转换，接缝处出现满幅阶跃（实测正弦幅值 0.5 却在接缝跳到 0.92，
+  23 个接缝里 16 个是坏的）——听感就是持续的刺耳咔哒。改成 `new AudioContext({ sampleRate: 16000 })`
+  后音频图内没有任何转换，实测 0 个坏接缝。
+- **16bit PCM 分片长度必须是偶数**。`InputStream.read` 可能返回奇数字节，把样本劈成两半；
+  前端 `new Int16Array(buffer)` 会抛 RangeError（整帧丢弃），或者少一个字节导致之后所有样本错位
+  → 刺耳白噪音。服务端按偶数对齐、前端留 carry 字节跨帧拼接，两道防线都要有。
+- **`stop()` 必须复位播放时间线**（`nextTime = 0`），否则下一轮首包会被排到上一轮遗留的时刻，
+  表现为「这段没声音」。
 
 ## 面试分析 (Interview Analysis)
 

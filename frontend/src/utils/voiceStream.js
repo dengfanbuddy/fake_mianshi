@@ -9,10 +9,36 @@ export function createVoiceStream({ sessionId, onReady, onPartial, onUserText, o
   let ws = null
   let started = false
   let closedByClient = false
+  /** 上一帧拆样本剩下的半个样本（奇数字节）。丢掉它会让自己之后的所有样本错位一字节 →
+   *  int16 被解释成噪声，听起来是突然的白噪音；所以必须跨帧拼回来。 */
+  let carry = null
+
+  function toInt16(arrayBuffer) {
+    const incoming = new Uint8Array(arrayBuffer)
+    let buf = incoming
+    if (carry) {
+      buf = new Uint8Array(carry.length + incoming.length)
+      buf.set(carry, 0)
+      buf.set(incoming, carry.length)
+      carry = null
+    }
+    let usable = buf.length - (buf.length % 2)
+    if (usable !== buf.length) {
+      carry = buf.slice(usable)
+    }
+    if (usable === 0) return null
+    if (buf.byteOffset % 2 === 0) {
+      return new Int16Array(buf.buffer, buf.byteOffset, usable / 2)
+    }
+    const aligned = new Uint8Array(usable)
+    aligned.set(buf.subarray(0, usable))
+    return new Int16Array(aligned.buffer)
+  }
 
   function connect(timeoutMs = 8000) {
     return new Promise((resolve, reject) => {
       let settled = false
+      carry = null
       const fail = (msg) => {
         if (settled) return
         settled = true
@@ -63,7 +89,8 @@ export function createVoiceStream({ sessionId, onReady, onPartial, onUserText, o
         } else {
           // 二进制帧：面试官语音 PCM
           if (ev.data instanceof ArrayBuffer) {
-            onAudio && onAudio(new Int16Array(ev.data))
+            const pcm = toInt16(ev.data)
+            if (pcm && pcm.length && onAudio) onAudio(pcm)
           }
         }
       }
