@@ -10,7 +10,7 @@ AI 驱动的 Java 面试训练工具：上传简历 → AI 分析 → 笔试 + �
 | 后端 | Spring Boot 4.1.0 + MyBatis-Plus 3.5.16 |
 | 数据库 | SQLite（免安装；WAL + `busy_timeout`） |
 | LLM | DeepSeek API（可在设置页切换） |
-| 语音 | TTS：腾讯云 API 或**本地 Qwen3-TTS sidecar**（设置页切换）；ASR：腾讯云 |
+| 语音 | TTS：腾讯云 API 或**本地 Qwen3-TTS**；ASR：腾讯云实时识别或**本地 Qwen3-ASR**（设置页切换供应商，本地模式免密钥） |
 
 > 数据访问是 MyBatis-Plus 的 `BaseMapper`，**不是** JPA。`repository/` 下的接口是 Mapper。
 
@@ -40,30 +40,33 @@ npm run dev
 ### 3. 配置密钥
 
 - **DeepSeek API Key**：打开前端「设置」页 → AI 模型配置 → 编辑默认的 deepseek 配置填入 API Key → 设为激活
-- **语音**：
-  - ASR（语音识别）必须走腾讯云：设置页填 SecretId / SecretKey / AppId（或环境变量
-    `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `TENCENT_APP_ID`）
-  - TTS（语音合成）可选腾讯云或本地开源模型 Qwen3-TTS，见下节
+- **语音**（二选一）：
+  - **本地**（推荐，免密钥）：TTS 与 ASR 都由本地 Qwen3 提供，见下节；腾讯云配置可留空
+  - **腾讯云**：ASR 需 SecretId / SecretKey / AppId，TTS 需 SecretId / SecretKey
+    （或环境变量 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` / `TENCENT_APP_ID`）。
+    注意 AppId 是账号信息而非密钥，缺了它实时流式识别（WebSocket）不可用，一句话识别不受影响
 
-### 4.（可选）启用本地 Qwen3-TTS 语音合成
+### 4.（可选）启用本地 Qwen3 语音（TTS + ASR）
 
-无需密钥、无调用费用，音色更自然且能按人设描述语气。需要 NVIDIA GPU（0.6B 模型约 3–4GB 显存）。
+无需密钥、无调用费用，音色更自然且能按人设描述语气；候选人说的话也不出本机。
+需要 NVIDIA GPU（TTS + ASR 共约 8GB 显存）。
 
 **只需安一次，之后不用手工启动**——后端会托管 sidecar 进程：
 
 ```bash
 cd voice-service
-uv sync                                    # 首次约 2-3GB（torch CUDA 轮子）
-pwsh -File scripts/download_model.ps1      # 从 ModelScope 下模型权重到 ./models
+uv sync                                                              # 首次约 2-3GB（torch CUDA 轮子）
+pwsh -File scripts/download_model.ps1                                # TTS 权重（约 2.4GB）
+pwsh -File scripts/download_model.ps1 -Model Qwen/Qwen3-ASR-0.6B-hf  # ASR 权重（约 1.5GB）
 ```
 
-然后到「设置 → 语音服务配置」把供应商切到 **本地 Qwen3-TTS**，保存并激活。
+然后到「设置 → 语音服务配置」把供应商切到 **本地 Qwen（TTS+ASR）**，保存并激活。
 
 此后：
 
 | 时机 | 行为 |
 |---|---|
-| 后端启动 | 检测到生效供应商是本地 Qwen 且 9100 没在跑 → **自动拉起 sidecar**（约 20s 加载模型） |
+| 后端启动 | 检测到生效供应商是本地 Qwen 且 9100 没在跑 → **自动拉起 sidecar**（约 30s 加载两张模型） |
 | 后端关闭 | **自动结束**由自己拉起的 sidecar，释放显存 |
 | 崩溃/被硬杀后重启 | 读 `data/voice-sidecar.pid` 接管上次遗留的进程，避免孤儿长期占着显存 |
 | 页面 | 「启动本地服务 / 停止」按钮 + 实时状态 + 最近日志（排错用） |
@@ -71,12 +74,17 @@ pwsh -File scripts/download_model.ps1      # 从 ModelScope 下模型权重到 .
 > 你自己手工 `pwsh -File run.ps1` 起的实例，后端只当作"外部实例"：不接管，关后端时也不会杀掉它。
 > 所有权判定见 `docs/adr/0009-local-voice-sidecar-lifecycle.md`。
 
-自检（延迟/显存/音质）：`cd voice-service && uv run python selfcheck.py`，详见 `voice-service/README.md`。
+自检（延迟/显存/音质）：`cd voice-service && uv run python selfcheck.py`；
+识别基准：`uv run python scripts/bench_asr.py`（TTS→ASR 闭环）。详见 `voice-service/README.md`。
+
+> 本地识别的「边说边出字」不是模型级流式（真流式要 vLLM，没有 Windows 轮子），而是每 ~2s 把累积
+> 音频重识别一次。想更快出最终结果，把 `VOICE_LOCAL_ASR_PARTIAL_MS=0` 关掉中间结果即可。
+> 取舍见 `docs/adr/0010-local-qwen-asr.md`。
 
 ## 测试与发布
 
 ```bash
-# 后端测试（目前 140 个，全部通过）
+# 后端测试（目前 172 个，全部通过）
 cd backend && ./mvnw.cmd -o test
 
 # 前端生产构建（产物在 frontend/dist）
@@ -125,7 +133,7 @@ build-release.cmd
 │       │                 #   analysis/ mock-interview/ project/ + AudioRecorder
 │       ├── composables/  # 有状态逻辑（分析加载、语音流、面试会话、人设切换）
 │       └── api/          # 接口封装
-├── voice-service/    # 本地 Qwen3-TTS sidecar（Python）
+├── voice-service/    # 本地 Qwen3 语音 sidecar（Python：TTS + ASR）
 ├── docs/
 │   ├── adr/              # 架构决策记录
 │   └── plans/            # 实现计划
@@ -143,6 +151,7 @@ build-release.cmd
 - `0007-bounded-resources.md` — 会话缓存落库、线程池有界、列表分页与索引
 - `0008-frontend-on-demand-and-splitting.md` — Element Plus 按需引入 + 巨型组件拆分
 - `0009-local-voice-sidecar-lifecycle.md` — 本地语音 sidecar 的生命周期由后端托管（所有权判定）
+- `0010-local-qwen-asr.md` — 本地语音识别用 Qwen3-ASR（transformers 原生，与 TTS 同进程）
 
 ## 已知限制
 
