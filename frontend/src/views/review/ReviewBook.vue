@@ -17,6 +17,9 @@ import RetryDialog from './RetryDialog.vue'
 const route = useRoute()
 const router = useRouter()
 
+/** 记住上次查看的项目，从侧边栏进来时直接回到它 */
+const LAST_PROJECT_KEY = 'review:lastProjectId'
+
 const projects = ref([])
 const projectId = ref(null)
 const overview = ref(null)
@@ -94,6 +97,11 @@ function selectProject(id) {
   projectId.value = id
   pointFilter.value = ''
   statusFilter.value = 'all'
+  try {
+    localStorage.setItem(LAST_PROJECT_KEY, String(id))
+  } catch (e) {
+    // 忽略：存不了下次回落到第一个项目
+  }
   router.replace({ path: `/review/${id}` })
   fetchAll()
 }
@@ -119,8 +127,20 @@ watch(statusFilter, fetchAll)
 onMounted(async () => {
   await fetchProjects()
   const fromRoute = Number(route.params.projectId)
-  const fallback = projects.value[0]?.id ?? null
-  projectId.value = Number.isFinite(fromRoute) && fromRoute > 0 ? fromRoute : fallback
+  const ids = projects.value.map((p) => p.id)
+  if (Number.isFinite(fromRoute) && fromRoute > 0) {
+    projectId.value = fromRoute
+  } else {
+    // 没带项目时优先回到上次看的项目：错题本是反复来的页面，
+    // 每次都跳到「最新创建的项目」很烦人（那往往不是你在复习的那个）
+    let remembered = null
+    try {
+      remembered = Number(localStorage.getItem(LAST_PROJECT_KEY))
+    } catch (e) {
+      remembered = null
+    }
+    projectId.value = ids.includes(remembered) ? remembered : (ids[0] ?? null)
+  }
   if (!projectId.value) {
     ElMessage.warning('还没有面试项目，先创建一个项目再来复习')
     return
