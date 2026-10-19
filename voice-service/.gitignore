@@ -1,0 +1,14 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.cache/
+
+# 模型权重（体积大，不进仓库）
+models/
+
+# 本地验证产物
+smoke_out/
+selfcheck_out.wav
+_bench.py
+_dump_server.py

@@ -1,6 +1,5 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAiConfigs, saveAiConfig, setActiveAiConfig } from '../api/ai-config'
 import {
   getPersonaList,
@@ -8,7 +7,37 @@ import {
   updatePersona,
   deletePersona,
 } from '../api/persona'
-import { getVoiceStatus, getVoiceConfig, saveVoiceConfig } from '../api/voice'
+import { getVoiceStatus, getVoiceConfig, saveVoiceConfig, getLocalVoiceHealth } from '../api/voice'
+
+/* ---------------- 语音供应商（腾讯云 / 本地 Qwen） ---------------- */
+const voiceProvider = ref('tencent') // tencent | local_qwen
+const localVoiceUrl = ref('http://127.0.0.1:9100')
+const localHealth = ref(null)
+const localTesting = ref(false)
+
+async function testLocalVoice() {
+  if (localTesting.value) return
+  localTesting.value = true
+  try {
+    const res = await getLocalVoiceHealth()
+    if (res.code === 200) {
+      localHealth.value = res.data || {}
+      if (localHealth.value.reachable) {
+        ElMessage.success(
+          localHealth.value.loaded
+            ? `本地语音服务正常（${localHealth.value.kind || 'qwen'}，${localHealth.value.speakers?.length || 0} 个音色）`
+            : '本地语音服务已连通，模型正在加载…'
+        )
+      } else {
+        ElMessage.warning('无法连通本地语音服务，请确认 voice-service 已启动（voice-service/run.ps1）')
+      }
+    }
+  } catch (e) {
+    localHealth.value = { reachable: false }
+  } finally {
+    localTesting.value = false
+  }
+}
 
 /* ---------------- 腾讯云语音配置状态 ---------------- */
 const voiceConfigured = ref(null) // null=加载中, true/false
@@ -23,6 +52,12 @@ async function fetchVoiceStatus() {
     if (res.code === 200 && res.data) {
       voiceConfigured.value = !!res.data.configured
       appIdConfigured.value = !!res.data.appIdConfigured
+      if (res.data.provider) {
+        voiceProvider.value = res.data.local ? 'local_qwen' : 'tencent'
+      }
+      if (res.data.localUrl) {
+        localVoiceUrl.value = res.data.localUrl
+      }
     }
   } catch (e) {
     // 拦截器已提示；加载失败按未配置处理，避免永久显示"检测中"
@@ -49,19 +84,32 @@ async function fetchVoiceConfig() {
 // 保存语音配置并激活（密钥留空保留原值）
 async function saveVoiceConfigAction() {
   if (voiceSaving.value) return
+  if (voiceProvider.value === 'local_qwen' && !localVoiceUrl.value.trim()) {
+    ElMessage.warning('请填写本地语音服务地址')
+    return
+  }
   voiceSaving.value = true
   try {
     const res = await saveVoiceConfig({
+      provider: voiceProvider.value,
+      ttsUrl: voiceProvider.value === 'local_qwen' ? localVoiceUrl.value.trim() : '',
       secretId: voiceForm.value.secretId.trim(),
       secretKey: voiceForm.value.secretKey.trim(),
       appId: voiceForm.value.appId.trim(),
     })
     if (res.code === 200) {
-      ElMessage.success('语音配置已保存并激活，立即生效')
+      ElMessage.success(
+        voiceProvider.value === 'local_qwen'
+          ? '已切换到本地 Qwen 语音合成，立即生效'
+          : '语音配置已保存并激活，立即生效'
+      )
       voiceMaskedId.value = res.data?.secretId || ''
       voiceForm.value.secretId = ''
       voiceForm.value.secretKey = ''
       voiceForm.value.appId = res.data?.appId || ''
+      if (res.data?.ttsUrl && voiceProvider.value === 'local_qwen') {
+        localVoiceUrl.value = res.data.ttsUrl
+      }
       await fetchVoiceStatus()
     } else {
       ElMessage.error(res.message || '保存失败')
@@ -303,13 +351,52 @@ onMounted(() => {
       </el-table>
     </el-card>
 
-    <!-- 腾讯云语音配置（页面可配置、存库激活） -->
+    <!-- 语音服务配置（腾讯云 API / 本地 Qwen sidecar，页面可切换、存库激活） -->
     <el-card class="section" shadow="never">
       <template #header>
-        <span>腾讯云语音配置（TTS/ASR）</span>
+        <span>语音服务配置（TTS/ASR）</span>
       </template>
 
       <el-form label-width="110px" class="voice-form">
+        <el-form-item label="语音供应商">
+          <el-radio-group v-model="voiceProvider">
+            <el-radio-button value="tencent">腾讯云 API</el-radio-button>
+            <el-radio-button value="local_qwen">本地 Qwen3-TTS</el-radio-button>
+          </el-radio-group>
+          <div class="hint">
+            本地模式需先启动 voice-service（<code>voice-service/run.ps1</code>），免密钥、无调用费用。
+          </div>
+        </el-form-item>
+
+        <template v-if="voiceProvider === 'local_qwen'">
+          <el-form-item label="服务地址">
+            <el-input v-model="localVoiceUrl" placeholder="http://127.0.0.1:9100" />
+            <el-button :loading="localTesting" style="margin-left: 12px" @click="testLocalVoice">
+              测试连通
+            </el-button>
+          </el-form-item>
+          <el-alert
+            v-if="localHealth"
+            :type="localHealth.reachable ? (localHealth.loaded ? 'success' : 'info') : 'warning'"
+            :closable="false"
+            style="margin-bottom: 12px"
+          >
+            <div v-if="!localHealth.reachable">
+              无法连通 {{ localHealth.baseUrl || localVoiceUrl }}：{{ localHealth.error || '服务未启动' }}
+            </div>
+            <div v-else>
+              已连通 · 模型 <strong>{{ localHealth.model }}</strong> ·
+              {{ localHealth.loaded ? '已加载' : '加载中' }} ·
+              运行在 {{ localHealth.device }}
+              <span v-if="localHealth.speakers?.length">· 音色：{{ localHealth.speakers.join(' / ') }}</span>
+              <span v-if="localHealth.loadError">· 加载错误：{{ localHealth.loadError }}</span>
+            </div>
+          </el-alert>
+          <el-alert type="info" :closable="false" style="margin-bottom: 12px">
+            当前阶段 TTS 走本地 Qwen，<strong>ASR（语音识别）仍走腾讯云</strong>，因此下面仍需保留腾讯云密钥。
+          </el-alert>
+        </template>
+
         <el-form-item label="SecretId">
           <el-input
             v-model="voiceForm.secretId"
@@ -342,13 +429,16 @@ onMounted(() => {
           <el-tag v-if="voiceConfigured === null" type="info" size="small" effect="plain">检测中…</el-tag>
           <el-tag v-else-if="voiceConfigured" type="success" size="small" effect="dark">已配置</el-tag>
           <el-tag v-else type="warning" size="small" effect="plain">未配置</el-tag>
-          <span class="hint" v-if="voiceConfigured === false">
+          <span class="hint" v-if="voiceProvider === 'local_qwen'">
+            TTS 使用本地 Qwen（{{ localVoiceUrl }}），腾讯云密钥仅用于语音识别。
+          </span>
+          <span class="hint" v-else-if="voiceConfigured === false">
             请在下方填写腾讯云密钥并保存，或通过后端环境变量 TENCENT_SECRET_ID / TENCENT_SECRET_KEY 配置。
           </span>
-          <span class="hint" v-else-if="voiceConfigured">STT / TTS 已可用。</span>
+          <span class="hint" v-else>STT / TTS 均由腾讯云提供。</span>
         </div>
         <div class="hint" v-if="voiceConfigured && !appIdConfigured">
-          提示：未配置 AppId，部分语音能力（如录音文件识别）可能受限，一句话识别不受影响。
+          提示：未配置 AppId，实时语音识别（WebSocket 流式）不可用，一句话识别不受影响。
         </div>
         <div class="hint">
           配置保存在本地数据库中（密钥仅脱敏回显，不会明文下发到浏览器），打包分发后直接在页面填写即可，无需修改环境变量。

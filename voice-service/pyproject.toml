@@ -1,0 +1,36 @@
+[project]
+name = "voice-service"
+version = "0.1.0"
+description = "本地 Qwen3-TTS 语音合成 sidecar（供 Spring Boot 后端调用）"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "numpy>=1.26",
+    "soundfile>=0.12",
+    "soxr>=0.3",
+    "faster-qwen3-tts>=0.5.4",
+    "torch>=2.5.1",
+    # 必须锁 5.15.x：transformers 5.20 的 MimiConfig 缺 rope_theta，加载 Qwen3-TTS 的 speech tokenizer 会报
+    # AttributeError: 'MimiConfig' object has no attribute 'rope_theta'
+    "transformers==5.15.1",
+]
+
+# 国内 PyPI 走清华源；torch 走官方 CUDA 轮子源（PyPI 上 Windows 的 torch 是 CPU 版）
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv]
+# 只解析 Windows 环境：faster-qwen3-tts 对 macOS/darwin 有额外可选依赖（qwentts-cpp-python），
+# 跨平台整体解析会因镜像缺轮子而失败
+environments = ["sys_platform == 'win32'"]
+
+[tool.uv.sources]
+torch = { index = "pytorch" }

@@ -1,6 +1,7 @@
 package com.fakemianshi.service.impl;
 
 import com.fakemianshi.config.TencentCloudProperties;
+import com.fakemianshi.config.VoiceProperties;
 import com.fakemianshi.dto.VoiceConfigDTO;
 import com.fakemianshi.entity.VoiceConfig;
 import com.fakemianshi.repository.VoiceConfigRepository;
@@ -13,17 +14,23 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
 /**
- * 腾讯云语音配置服务实现：数据库配置优先，无配置时回退环境变量。
+ * 语音配置服务实现：数据库配置优先，无配置时回退环境变量/配置文件默认值。
+ *
+ * <p>支持两种供应商：{@code tencent}（腾讯云，需密钥）与 {@code local_qwen}
+ * （本地 voice-service sidecar，只需地址）。切换供应商即「保存配置并激活」。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class VoiceConfigServiceImpl implements VoiceConfigService {
 
-    private static final String PROVIDER_TENCENT = "tencent";
+    private static final String PROVIDER_TENCENT = VoiceConfig.PROVIDER_TENCENT;
+    private static final String DEFAULT_ASR_URL = "https://asr.tencentcloudapi.com";
+    private static final String DEFAULT_TTS_URL = "https://tts.tencentcloudapi.com";
 
     private final VoiceConfigRepository voiceConfigRepository;
     private final TencentCloudProperties properties;
+    private final VoiceProperties voiceProperties;
 
     @Override
     @Transactional
@@ -36,21 +43,29 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
             voiceConfigRepository.updateById(old);
         }
 
+        boolean local = isLocal(dto.getProvider());
         VoiceConfig cfg = new VoiceConfig();
-        cfg.setProvider(PROVIDER_TENCENT);
+        cfg.setProvider(local ? VoiceConfig.PROVIDER_LOCAL_QWEN : PROVIDER_TENCENT);
         // 密钥留空或为脱敏值（含 *）时保留原值：避免页面回显的脱敏 SecretId 被误存、SecretKey 被清空
         cfg.setSecretId(resolveSecret(dto.getSecretId(), old == null ? null : old.getSecretId()));
         cfg.setSecretKey(resolveSecret(dto.getSecretKey(), old == null ? null : old.getSecretKey()));
-        cfg.setAppId(dto.getAppId() == null ? null : dto.getAppId().trim());
+        cfg.setAppId(resolveSecret(dto.getAppId(), old == null ? null : old.getAppId()));
         cfg.setRegion(dto.getRegion() == null || dto.getRegion().isBlank()
                 ? "ap-guangzhou" : dto.getRegion().trim());
         cfg.setAsrUrl(dto.getAsrUrl() == null || dto.getAsrUrl().isBlank()
-                ? "https://asr.tencentcloudapi.com" : dto.getAsrUrl().trim());
-        cfg.setTtsUrl(dto.getTtsUrl() == null || dto.getTtsUrl().isBlank()
-                ? "https://tts.tencentcloudapi.com" : dto.getTtsUrl().trim());
+                ? DEFAULT_ASR_URL : dto.getAsrUrl().trim());
+        if (local) {
+            // 本地模式下 ttsUrl 存放 sidecar 根地址
+            cfg.setTtsUrl(dto.getTtsUrl() == null || dto.getTtsUrl().isBlank()
+                    ? voiceProperties.getLocal().getBaseUrl() : trimSlash(dto.getTtsUrl().trim()));
+        } else {
+            cfg.setTtsUrl(dto.getTtsUrl() == null || dto.getTtsUrl().isBlank()
+                    ? DEFAULT_TTS_URL : dto.getTtsUrl().trim());
+        }
         cfg.setIsActive(true); // 保存的配置即激活
         cfg.setUpdatedAt(LocalDateTime.now());
         voiceConfigRepository.insert(cfg);
+        log.info("语音配置已激活: provider={} ttsUrl={}", cfg.getProvider(), cfg.getTtsUrl());
         return cfg;
     }
 
@@ -60,6 +75,18 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
             return original;
         }
         return input.trim();
+    }
+
+    private static boolean isLocal(String provider) {
+        if (provider == null) {
+            return false;
+        }
+        String p = provider.trim().toLowerCase();
+        return p.startsWith("local") || p.equals("qwen") || p.equals("qwen3");
+    }
+
+    private static String trimSlash(String url) {
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
     }
 
     @Override
@@ -76,6 +103,7 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
         dto.setTtsUrl(cfg == null ? null : cfg.getTtsUrl());
         dto.setIsActive(cfg == null ? false : cfg.getIsActive());
         dto.setConfigured(cfg != null && cfg.isConfigured());
+        dto.setLocal(cfg != null && cfg.isLocalProvider());
         return dto;
     }
 
@@ -96,6 +124,16 @@ public class VoiceConfigServiceImpl implements VoiceConfigService {
             env.setRegion(properties.getRegion());
             env.setAsrUrl(properties.getAsrUrl());
             env.setTtsUrl(properties.getTtsUrl());
+            env.setIsActive(true);
+            return env;
+        }
+        // 配置默认供应商为本地 Qwen 时，无需任何密钥
+        if (isLocal(voiceProperties.getProvider())) {
+            VoiceConfig env = new VoiceConfig();
+            env.setProvider(VoiceConfig.PROVIDER_LOCAL_QWEN);
+            env.setRegion(properties.getRegion());
+            env.setAsrUrl(properties.getAsrUrl());
+            env.setTtsUrl(voiceProperties.getLocal().getBaseUrl());
             env.setIsActive(true);
             return env;
         }

@@ -26,7 +26,7 @@ import java.util.Map;
 /**
  * 语音接口。
  *
- * <p>注意：服务器 context-path 为 /api，因此这里的 /voice 实际暴露为 /api/voice。
+ * <p>接口统一暴露为 /api/voice（/api 前缀由 WebMvcConfig 统一补充）。
  */
 @RestController
 @RequestMapping("/voice")
@@ -36,19 +36,31 @@ public class VoiceController {
     private static final String AUDIO_PATH_PREFIX = "/voice/audio/";
 
     private final VoiceService voiceService;
+    private final com.fakemianshi.service.impl.VoiceServiceRouter voiceServiceRouter;
     private final AudioStorageUtil audioStorageUtil;
     private final TencentCloudProperties tencentCloudProperties;
     private final com.fakemianshi.service.VoiceConfigService voiceConfigService;
 
-    /** 腾讯云语音密钥配置状态（数据库配置或环境变量，供前端展示，不暴露密钥本身） */
+    /** 语音供应商与配置状态（数据库配置或环境变量，供前端展示，不暴露密钥本身） */
     @GetMapping("/status")
     public ApiResponse<Map<String, Object>> status() {
         com.fakemianshi.dto.VoiceConfigDTO cfg = voiceConfigService.getActiveConfig();
         boolean configured = cfg != null && Boolean.TRUE.equals(cfg.getConfigured());
         boolean appIdConfigured = cfg != null && cfg.getAppId() != null && !cfg.getAppId().isBlank();
+        boolean local = cfg != null && Boolean.TRUE.equals(cfg.getLocal());
+        String localUrl = local && cfg.getTtsUrl() != null ? cfg.getTtsUrl() : "";
         return ApiResponse.success(Map.of(
                 "configured", configured,
-                "appIdConfigured", appIdConfigured));
+                "appIdConfigured", appIdConfigured,
+                "provider", voiceServiceRouter.activeProvider(),
+                "local", local,
+                "localUrl", localUrl));
+    }
+
+    /** 本地 Qwen 语音服务（voice-service sidecar）连通性与模型状态 */
+    @GetMapping("/local/health")
+    public ApiResponse<Map<String, Object>> localHealth() {
+        return ApiResponse.success(voiceServiceRouter.localHealth());
     }
 
     /** 获取当前生效的语音配置（脱敏，页面回显用） */

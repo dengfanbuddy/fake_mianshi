@@ -39,4 +39,13 @@ public interface VoiceService {
      * @param onPcmChunk PCM 裸流分片回调（16k/16bit/单声道）
      */
     void synthesizeSpeechStream(String text, String voiceType, java.util.function.Consumer<byte[]> onPcmChunk);
+
+    /**
+     * 逐句播报时是否优先走流式合成。
+     *
+     * <p>本地 Qwen 首包约 0.5s，流式能明显降低每句的等待；腾讯云沿用既有的整句合成路径。
+     */
+    default boolean preferStreamingTts() {
+        return false;
+    }
 }

@@ -85,7 +85,22 @@ public class VoiceServiceImpl implements VoiceService {
         if (voiceConfigService != null) {
             com.fakemianshi.entity.VoiceConfig cfg = voiceConfigService.resolveActive();
             if (cfg != null && cfg.isConfigured()) {
-                return cfg;
+                if (!cfg.isLocalProvider()) {
+                    return cfg;
+                }
+                // 当前供应商是本地 Qwen：腾讯云实现仍复用同一份密钥，但地址回到官方端点
+                // （切换供应商时密钥会被保留，回退/语音识别才能继续用）
+                com.fakemianshi.entity.VoiceConfig tencent = new com.fakemianshi.entity.VoiceConfig();
+                tencent.setProvider(com.fakemianshi.entity.VoiceConfig.PROVIDER_TENCENT);
+                tencent.setSecretId(cfg.getSecretId());
+                tencent.setSecretKey(cfg.getSecretKey());
+                tencent.setAppId(cfg.getAppId());
+                tencent.setRegion(cfg.getRegion());
+                tencent.setAsrUrl(cfg.getAsrUrl() == null || cfg.getAsrUrl().isBlank()
+                        ? properties.getAsrUrl() : cfg.getAsrUrl());
+                tencent.setTtsUrl(properties.getTtsUrl());
+                tencent.setIsActive(true);
+                return tencent.isConfigured() ? tencent : null;
             }
         }
         return null;

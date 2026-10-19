@@ -10,7 +10,7 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 /**
  * WebSocket 配置：注册面试语音流式端点。
  *
- * <p>注意：服务器 context-path 为 /api，因此该端点实际暴露为 /api/ws/interview。
+ * <p>该端点暴露为 /api/ws/interview（前端语音流式客户端连接到该地址）。
  */
 @Configuration
 @EnableWebSocket
@@ -21,7 +21,7 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(interviewVoiceWebSocketHandler, "/ws/interview")
+        registry.addHandler(interviewVoiceWebSocketHandler, "/api/ws/interview")
                 // 仅允许本机来源，防止跨站 WebSocket 劫持（CSWSH）驱动面试/消耗额度
                 .setAllowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*");
     }

@@ -21,6 +21,9 @@ export const synthesizeSpeech = async (text, voiceType) => {
 // 腾讯云语音密钥配置状态（不暴露密钥本身）
 export const getVoiceStatus = () => request.get('/voice/status')
 
+// 本地 Qwen 语音服务（voice-service sidecar）连通性与模型状态
+export const getLocalVoiceHealth = () => request.get('/voice/local/health')
+
 // 获取当前生效的语音配置（脱敏回显）
 export const getVoiceConfig = () => request.get('/voice/config')
 

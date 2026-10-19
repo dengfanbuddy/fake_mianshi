@@ -15,6 +15,16 @@ public class VoiceConfigDTO {
     private Boolean isActive;
     /** 是否已配置完整密钥（脱敏后的状态标识） */
     private Boolean configured;
+    /** 当前生效供应商是否为本地 Qwen sidecar（前端用于切换 UI 状态） */
+    private Boolean local;
+
+    public Boolean getLocal() {
+        return local;
+    }
+
+    public void setLocal(Boolean local) {
+        this.local = local;
+    }
 
     public String getProvider() {
         return provider;
