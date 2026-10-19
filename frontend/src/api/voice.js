@@ -24,6 +24,15 @@ export const getVoiceStatus = () => request.get('/voice/status')
 // 本地 Qwen 语音服务（voice-service sidecar）连通性与模型状态
 export const getLocalVoiceHealth = () => request.get('/voice/local/health')
 
+// sidecar 托管状态（是否由后端拉起、PID、最近日志）
+export const getLocalVoiceProcess = () => request.get('/voice/local/process')
+
+// 启动 sidecar（幂等；外部已在运行时不接管）
+export const startLocalVoice = () => request.post('/voice/local/start')
+
+// 结束 sidecar（只结束由后端拉起的进程）
+export const stopLocalVoice = () => request.post('/voice/local/stop')
+
 // 获取当前生效的语音配置（脱敏回显）
 export const getVoiceConfig = () => request.get('/voice/config')
 

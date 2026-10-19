@@ -36,5 +36,40 @@ public class VoiceProperties {
 
         /** 本地合成失败时是否自动回退腾讯云（腾讯云已配置的前提下） */
         private boolean fallbackToTencent = true;
+
+        /**
+         * 后端启动时：若生效供应商是本地 Qwen 且 sidecar 未运行，是否自动拉起。
+         *
+         * <p>测试环境必须关掉（见 src/test/resources/application.yml），否则跑测试会真的去 spawn Python。
+         */
+        private boolean autoStart = true;
+
+        /**
+         * 后端关闭时是否结束由本进程拉起的 sidecar。
+         *
+         * <p>只结束"自己拉起的"——如果启动时 sidecar 已在运行（用户手工跑的），
+         * 不接管也不结束，避免把别人的服务误杀。
+         */
+        private boolean stopOnShutdown = true;
+
+        /**
+         * voice-service 目录；留空则自动探测（../voice-service、voice-service）。
+         * 目录下需存在 app/main.py。
+         */
+        private String serviceDir = "";
+
+        /** Python 解释器；留空则自动探测 {@code <serviceDir>/.venv/Scripts/python.exe}（Windows）或 .venv/bin/python */
+        private String python = "";
+
+        /** 结束进程时的等待秒数，超时则强杀 */
+        private int stopTimeoutSeconds = 15;
+
+        /**
+         * 记录"本后端拉起的 sidecar PID"的文件。
+         *
+         * <p>用途是崩溃/硬杀后的接管：关闭钩子没机会执行时进程会变成孤儿（占着 GPU 显存），
+         * 下次启动读到这个 PID 且进程仍活着，就接管它，从而在下次正常关闭时被清理。
+         */
+        private String pidFile = "data/voice-sidecar.pid";
     }
 }

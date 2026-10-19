@@ -25,3 +25,9 @@ mybatis-plus:
 app:
   upload-dir: ./uploads
   audio-dir: ./uploads/audio
+  # 测试环境禁止托管本地语音 sidecar：否则 @SpringBootTest 会真的 spawn Python 进程
+  voice:
+    local:
+      auto-start: false
+      stop-on-shutdown: false
+      pid-file: target/test-voice-sidecar.pid

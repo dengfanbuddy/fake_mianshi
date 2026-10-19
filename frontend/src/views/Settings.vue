@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { getAiConfigs, saveAiConfig, setActiveAiConfig } from '../api/ai-config'
 import {
   getPersonaList,
@@ -7,7 +7,15 @@ import {
   updatePersona,
   deletePersona,
 } from '../api/persona'
-import { getVoiceStatus, getVoiceConfig, saveVoiceConfig, getLocalVoiceHealth } from '../api/voice'
+import {
+  getVoiceStatus,
+  getVoiceConfig,
+  saveVoiceConfig,
+  getLocalVoiceHealth,
+  getLocalVoiceProcess,
+  startLocalVoice,
+  stopLocalVoice,
+} from '../api/voice'
 
 /* ---------------- 语音供应商（腾讯云 / 本地 Qwen） ---------------- */
 const voiceProvider = ref('tencent') // tencent | local_qwen
@@ -15,22 +23,46 @@ const localVoiceUrl = ref('http://127.0.0.1:9100')
 const localHealth = ref(null)
 const localTesting = ref(false)
 
+/** 后端托管的 sidecar 进程状态（PID / 是否托管 / 最近日志） */
+const localProcess = ref(null)
+const localStarting = ref(false)
+const localStopping = ref(false)
+/** 启动后的健康轮询句柄：必须在 onBeforeUnmount 清理，否则离开页面还在跑 */
+let localPollTimer = null
+
+async function fetchLocalHealth() {
+  const res = await getLocalVoiceHealth()
+  if (res.code === 200) {
+    localHealth.value = res.data || {}
+  }
+  return localHealth.value
+}
+
+async function fetchLocalProcess() {
+  try {
+    const res = await getLocalVoiceProcess()
+    if (res.code === 200) {
+      localProcess.value = res.data || null
+    }
+  } catch (e) {
+    // 状态接口失败不打扰用户，健康检查那块会给出可见反馈
+  }
+}
+
 async function testLocalVoice() {
   if (localTesting.value) return
   localTesting.value = true
   try {
-    const res = await getLocalVoiceHealth()
-    if (res.code === 200) {
-      localHealth.value = res.data || {}
-      if (localHealth.value.reachable) {
-        ElMessage.success(
-          localHealth.value.loaded
-            ? `本地语音服务正常（${localHealth.value.kind || 'qwen'}，${localHealth.value.speakers?.length || 0} 个音色）`
-            : '本地语音服务已连通，模型正在加载…'
-        )
-      } else {
-        ElMessage.warning('无法连通本地语音服务，请确认 voice-service 已启动（voice-service/run.ps1）')
-      }
+    await fetchLocalHealth()
+    const health = localHealth.value || {}
+    if (health.reachable) {
+      ElMessage.success(
+        health.loaded
+          ? `本地语音服务正常（${health.kind || 'qwen'}，${health.speakers?.length || 0} 个音色）`
+          : '本地语音服务已连通，模型正在加载…'
+      )
+    } else {
+      ElMessage.warning('无法连通本地语音服务，可点「启动本地服务」由后端拉起')
     }
   } catch (e) {
     localHealth.value = { reachable: false }
@@ -38,6 +70,90 @@ async function testLocalVoice() {
     localTesting.value = false
   }
 }
+
+function stopLocalPolling() {
+  if (localPollTimer) {
+    clearInterval(localPollTimer)
+    localPollTimer = null
+  }
+}
+
+/** 启动后每 2 秒刷一次状态与健康，直到模型就绪（约 20s）或 60s 超时 */
+function startLocalPolling() {
+  stopLocalPolling()
+  let ticks = 0
+  localPollTimer = setInterval(async () => {
+    ticks += 1
+    await Promise.all([fetchLocalProcess(), fetchLocalHealth().catch(() => null)])
+    const health = localHealth.value
+    if ((health && health.reachable && health.loaded) || ticks >= 30) {
+      stopLocalPolling()
+    }
+  }, 2000)
+}
+
+async function startLocalVoiceService() {
+  if (localStarting.value) return
+  localStarting.value = true
+  try {
+    const res = await startLocalVoice()
+    if (res.code === 200) {
+      const data = res.data || {}
+      if (data.started) {
+        ElMessage.success(data.message || '已启动本地语音服务')
+      } else {
+        ElMessage.info(data.message || '本地语音服务已在运行')
+      }
+      await fetchLocalProcess()
+      startLocalPolling()
+    }
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    localStarting.value = false
+  }
+}
+
+async function stopLocalVoiceService() {
+  if (localStopping.value) return
+  localStopping.value = true
+  try {
+    const res = await stopLocalVoice()
+    if (res.code === 200) {
+      const data = res.data || {}
+      if (data.stopped) {
+        ElMessage.success(data.message || '已结束本地语音服务')
+        localHealth.value = { reachable: false }
+      } else {
+        ElMessage.info(data.message || '当前没有由后端托管的进程')
+      }
+      await fetchLocalProcess()
+      stopLocalPolling()
+    }
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    localStopping.value = false
+  }
+}
+
+const localProcessText = computed(() => {
+  const proc = localProcess.value
+  const reachable = Boolean(localHealth.value?.reachable)
+  if (proc?.managed) {
+    return reachable ? `后端托管中 · PID ${proc.pid}` : `后端已拉起 · PID ${proc.pid} · 加载中`
+  }
+  if (reachable) {
+    return '外部实例运行中（后端关闭时不会结束它）'
+  }
+  return '未运行'
+})
+
+const localProcessTagType = computed(() => {
+  if (localProcess.value?.managed) return 'success'
+  if (localHealth.value?.reachable) return 'info'
+  return 'warning'
+})
 
 /* ---------------- 腾讯云语音配置状态 ---------------- */
 const voiceConfigured = ref(null) // null=加载中, true/false
@@ -306,6 +422,27 @@ onMounted(() => {
   fetchPersonas()
   fetchVoiceConfig()
   fetchVoiceStatus()
+  fetchLocalProcess().then(() => {
+    // 本地供应商时顺带探一次连通性，页面一进来就能看到"未运行/加载中/就绪"
+    if (voiceProvider.value !== 'local_qwen') {
+      return
+    }
+    fetchLocalHealth()
+      .then(() => {
+        const health = localHealth.value || {}
+        // 后端已托管但模型还没加载完：开个短轮询，让标签自己变成"已加载"，
+        // 而不是停在进页面那一刻的旧快照
+        if (localProcess.value?.managed && !(health.reachable && health.loaded)) {
+          startLocalPolling()
+        }
+      })
+      .catch(() => null)
+  })
+})
+
+onBeforeUnmount(() => {
+  // 离开页面必须停掉轮询，否则定时器会一直跑
+  stopLocalPolling()
 })
 </script>
 
@@ -364,11 +501,31 @@ onMounted(() => {
             <el-radio-button value="local_qwen">本地 Qwen3-TTS</el-radio-button>
           </el-radio-group>
           <div class="hint">
-            本地模式需先启动 voice-service（<code>voice-service/run.ps1</code>），免密钥、无调用费用。
+            本地模式免密钥、无调用费用。后端启动时若供应商是本地 Qwen，会<strong>自动拉起</strong>
+            voice-service；后端关闭时同步结束（只结束由后端拉起的那一个，手工启动的实例不会被误杀）。
           </div>
         </el-form-item>
 
         <template v-if="voiceProvider === 'local_qwen'">
+          <el-form-item label="本地服务">
+            <el-button type="primary" :loading="localStarting" @click="startLocalVoiceService">
+              启动本地服务
+            </el-button>
+            <el-button
+              :loading="localStopping"
+              :disabled="!localProcess?.managed"
+              style="margin-left: 12px"
+              @click="stopLocalVoiceService"
+            >
+              停止
+            </el-button>
+            <el-tag :type="localProcessTagType" style="margin-left: 12px">
+              {{ localProcessText }}
+            </el-tag>
+            <div v-if="localProcess?.lastError" class="hint error-hint">
+              上次启动失败：{{ localProcess.lastError }}
+            </div>
+          </el-form-item>
           <el-form-item label="服务地址">
             <el-input v-model="localVoiceUrl" placeholder="http://127.0.0.1:9100" />
             <el-button :loading="localTesting" style="margin-left: 12px" @click="testLocalVoice">
@@ -395,6 +552,16 @@ onMounted(() => {
           <el-alert type="info" :closable="false" style="margin-bottom: 12px">
             当前阶段 TTS 走本地 Qwen，<strong>ASR（语音识别）仍走腾讯云</strong>，因此下面仍需保留腾讯云密钥。
           </el-alert>
+          <el-form-item v-if="localProcess?.logs?.length" label="最近日志">
+            <el-collapse class="voice-log-collapse">
+              <el-collapse-item
+                :title="`展开查看 sidecar 输出（${localProcess.logs.length} 行，排错用）`"
+                name="logs"
+              >
+                <pre class="voice-log">{{ localProcess.logs.join('\n') }}</pre>
+              </el-collapse-item>
+            </el-collapse>
+          </el-form-item>
         </template>
 
         <el-form-item label="SecretId">
@@ -575,6 +742,27 @@ onMounted(() => {
   margin-left: 8px;
   color: #909399;
   font-size: 13px;
+}
+.error-hint {
+  color: #f56c6c;
+}
+.voice-log {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  width: 100%;
+}
+.voice-log-collapse {
+  width: 100%;
 }
 .active-hint {
   color: #909399;

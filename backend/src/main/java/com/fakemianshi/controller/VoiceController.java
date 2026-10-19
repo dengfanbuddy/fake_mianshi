@@ -40,6 +40,7 @@ public class VoiceController {
     private final AudioStorageUtil audioStorageUtil;
     private final TencentCloudProperties tencentCloudProperties;
     private final com.fakemianshi.service.VoiceConfigService voiceConfigService;
+    private final com.fakemianshi.service.LocalVoiceProcessManager localVoiceProcessManager;
 
     /** 语音供应商与配置状态（数据库配置或环境变量，供前端展示，不暴露密钥本身） */
     @GetMapping("/status")
@@ -61,6 +62,29 @@ public class VoiceController {
     @GetMapping("/local/health")
     public ApiResponse<Map<String, Object>> localHealth() {
         return ApiResponse.success(voiceServiceRouter.localHealth());
+    }
+
+    /**
+     * sidecar 托管状态：是否由后端拉起、PID、运行时长、最近日志。
+     *
+     * <p>只回报进程簿记，不发起网络探测（避免页面轮询被 5s 连接超时拖住）；
+     * 连通性与模型加载进度请用 {@code GET /voice/local/health}。
+     */
+    @GetMapping("/local/process")
+    public ApiResponse<Map<String, Object>> localProcess() {
+        return ApiResponse.success(localVoiceProcessManager.status());
+    }
+
+    /** 启动 sidecar（幂等）；外部已在运行时不接管 */
+    @PostMapping("/local/start")
+    public ApiResponse<Map<String, Object>> startLocal() {
+        return ApiResponse.success(localVoiceProcessManager.start());
+    }
+
+    /** 结束 sidecar；只结束由本后端拉起的进程，外部实例不碰 */
+    @PostMapping("/local/stop")
+    public ApiResponse<Map<String, Object>> stopLocal() {
+        return ApiResponse.success(localVoiceProcessManager.stop());
     }
 
     /** 获取当前生效的语音配置（脱敏，页面回显用） */
