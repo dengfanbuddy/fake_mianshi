@@ -13,6 +13,8 @@ import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.impl.QuestionGenerationServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Optional;
@@ -61,7 +63,8 @@ class QuestionGenerationServiceTest {
                 llmService, resumeService, positionRequirementService,
                 weaknessTagRepository, writtenTestQuestionRepository,
                 interviewerPersonaRepository,
-                promptTemplateService, interviewProjectRepository);
+                promptTemplateService, interviewProjectRepository,
+                passthroughTransactionTemplate());
 
         // save 直接返回传入对象，模拟 JPA 行为
         when(writtenTestQuestionRepository.insert(any(WrittenTestQuestion.class)))
@@ -196,5 +199,15 @@ class QuestionGenerationServiceTest {
 
         assertThrows(BusinessException.class,
                 () -> service.generateOpeningMessage(1L, 999L));
+    }
+
+    /** 直通式 TransactionTemplate：立即执行回调（单元测试没有真实事务管理器） */
+    private static TransactionTemplate passthroughTransactionTemplate() {
+        TransactionTemplate template = mock(TransactionTemplate.class);
+        when(template.execute(any(TransactionCallback.class))).thenAnswer(inv -> {
+            TransactionCallback<?> callback = inv.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+        return template;
     }
 }

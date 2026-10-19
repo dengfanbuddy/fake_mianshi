@@ -23,6 +23,8 @@ import com.fakemianshi.repository.WrittenTestQuestionRepository;
 import com.fakemianshi.service.impl.AnalysisServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -89,7 +91,7 @@ class AnalysisServiceTest {
                 sessionRepository, writtenTestQuestionRepository, writtenTestAnswerRepository,
                 mockInterviewMessageRepository, sessionAnalysisRepository, questionAnalysisRepository,
                 weaknessTagRepository, historicalAnalysisRepository, llmService,
-                promptTemplateService, interviewProjectRepository);
+                promptTemplateService, interviewProjectRepository, passthroughTransactionTemplate());
 
         // 会话分析内存库
         when(sessionAnalysisRepository.insert(any(SessionAnalysis.class))).thenAnswer(inv -> {
@@ -450,6 +452,16 @@ class AnalysisServiceTest {
     }
 
     // ---------- helpers ----------
+
+    /** 直通式 TransactionTemplate：立即执行回调（单元测试没有真实事务管理器） */
+    private static TransactionTemplate passthroughTransactionTemplate() {
+        TransactionTemplate template = mock(TransactionTemplate.class);
+        when(template.execute(any(TransactionCallback.class))).thenAnswer(inv -> {
+            TransactionCallback<?> callback = inv.getArgument(0);
+            return callback.doInTransaction(null);
+        });
+        return template;
+    }
 
     private InterviewSession session(Long id, Long projectId, String type) {
         InterviewSession s = new InterviewSession();

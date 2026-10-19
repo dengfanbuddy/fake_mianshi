@@ -29,7 +29,9 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -42,6 +44,11 @@ import java.util.stream.Collectors;
  *
  * <p>评分规则：单选/多选每题 3 分、填空每题 2 分、简答每题 5 分（暂不自动判分，留给 LLM 分析环节）；
  * 总分按 100 制归一化：实际得分 / 满分 * 100，保留 1 位小数。
+ *
+ * <p>计时规则（服务端权威）：出题完成后才写入 startedAt 并开始计时，
+ * 截止时间 = startedAt + timeLimit，由服务端计算并通过 deadline 下发；
+ * 交卷时以库里的 startedAt 判定是否超时（超出 {@link #SUBMIT_GRACE_SECONDS} 宽限），
+ * 超时仍照常判分入库，仅在响应与报告中打上 expired 标记——绝不因超时销毁用户的作答。
  */
 @Service
 @RequiredArgsConstructor
@@ -51,6 +58,12 @@ public class WrittenTestServiceImpl implements WrittenTestService {
 
     private static final int DEFAULT_TIME_LIMIT = 60;
     private static final int DEFAULT_QUESTION_COUNT = 12;
+
+    /**
+     * 交卷宽限期（秒）：覆盖前端自动交卷时的网络与渲染延迟。
+     * 实际用时超出「时长限制 + 宽限期」即判定为超时提交。
+     */
+    private static final long SUBMIT_GRACE_SECONDS = 30;
 
     private static final String TYPE_SINGLE = "SINGLE_CHOICE";
     private static final String TYPE_MULTIPLE = "MULTIPLE_CHOICE";
@@ -71,9 +84,14 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         InterviewSession session = createSession(projectId, req);
 
         int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
-        List<WrittenTestQuestion> questions =
-                questionGenerationService.generateWrittenTestQuestions(session.getId(), projectId, questionCount);
-        return buildStartResponse(session, questions);
+        List<WrittenTestQuestion> questions;
+        try {
+            questions = questionGenerationService.generateWrittenTestQuestions(session.getId(), projectId, questionCount);
+        } catch (RuntimeException e) {
+            discardSession(session.getId());
+            throw e;
+        }
+        return buildStartResponse(startClock(session), questions);
     }
 
     @Override
@@ -83,12 +101,18 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         InterviewSession session = createSession(projectId, req);
 
         int questionCount = req != null && req.getQuestionCount() != null ? req.getQuestionCount() : DEFAULT_QUESTION_COUNT;
-        List<WrittenTestQuestion> questions = questionGenerationService
-                .generateWrittenTestQuestionsStream(session.getId(), projectId, questionCount, onDelta, onReasoning);
-        return buildStartResponse(session, questions);
+        List<WrittenTestQuestion> questions;
+        try {
+            questions = questionGenerationService
+                    .generateWrittenTestQuestionsStream(session.getId(), projectId, questionCount, onDelta, onReasoning);
+        } catch (RuntimeException e) {
+            discardSession(session.getId());
+            throw e;
+        }
+        return buildStartResponse(startClock(session), questions);
     }
 
-    /** 校验项目并创建笔试会话（含默认时长/题数） */
+    /** 校验项目并创建笔试会话（含默认时长/题数），此时尚未开始计时 */
     private InterviewSession createSession(Long projectId, WrittenTestStartRequest req) {
         // 校验项目存在
         projectService.findById(projectId);
@@ -99,9 +123,29 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         session.setType("WRITTEN");
         session.setStatus("IN_PROGRESS");
         session.setTimeLimit(timeLimit);
-        session.setStartedAt(LocalDateTime.now());
         sessionRepository.insert(session);
         return session;
+    }
+
+    /**
+     * 记录考试真正开始的时间并落库。
+     *
+     * <p>必须在出题（LLM）完成后调用：一次出题可能要几十秒，若在创建会话时就开始计时，
+     * 用户还没看到第一道题就已经被扣掉了一两分钟。
+     */
+    private InterviewSession startClock(InterviewSession session) {
+        session.setStartedAt(LocalDateTime.now());
+        sessionRepository.updateById(session);
+        return session;
+    }
+
+    /** 出题失败时清理孤儿会话，避免 IN_PROGRESS 的空考试在库里越积越多 */
+    private void discardSession(Long sessionId) {
+        try {
+            sessionRepository.deleteById(sessionId);
+        } catch (Exception e) {
+            log.warn("清理出题失败的会话失败: sessionId={}, cause={}", sessionId, e.getMessage());
+        }
     }
 
     private WrittenTestStartResponse buildStartResponse(InterviewSession session, List<WrittenTestQuestion> questions) {
@@ -110,8 +154,8 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         WrittenTestStartResponse response = new WrittenTestStartResponse();
         response.setSessionId(session.getId());
         response.setTimeLimit(session.getTimeLimit());
-        response.setStartedAt(session.getStartedAt() == null ? null
-                : session.getStartedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
+        response.setStartedAt(toEpochMilli(session.getStartedAt()));
+        response.setDeadline(toEpochMilli(deadlineOf(session)));
         response.setQuestions(examQuestions);
         return response;
     }
@@ -186,9 +230,18 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         }
 
         double totalScore = normalizeScore(earned, full);
+        LocalDateTime now = LocalDateTime.now();
+        // 服务端计时校验：以库里的 startedAt + timeLimit 判定是否超时，
+        // 不信任前端传来的任何时长/剩余时间（前端只能影响自己看到的倒计时）。
+        boolean expired = isExpired(session, now);
         session.setStatus("COMPLETED");
-        session.setCompletedAt(LocalDateTime.now());
+        session.setCompletedAt(now);
         sessionRepository.updateById(session);
+
+        if (expired) {
+            log.warn("笔试超时提交: sessionId={}, timeLimit={}min, elapsed={}s",
+                    sessionId, session.getTimeLimit(), elapsedSecondsOf(session));
+        }
 
         // 自动触发会话分析（在事务提交后执行，失败不阻断提交）
         triggerAnalysisAfterCommit(sessionId);
@@ -198,6 +251,9 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         response.setTotalScore(totalScore);
         response.setTotalQuestions(questions.size());
         response.setCorrectCount(correctCount);
+        response.setTimeLimit(session.getTimeLimit());
+        response.setElapsedSeconds(elapsedSecondsOf(session));
+        response.setExpired(expired);
         response.setResults(results);
         return response;
     }
@@ -244,17 +300,25 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         response.setSessionId(sessionId);
         response.setResults(results);
         response.setTotalScore(normalizeScore(earned, full));
+        response.setTimeLimit(session.getTimeLimit());
+        response.setElapsedSeconds(elapsedSecondsOf(session));
+        // 用交卷时刻判定（而非当前时间），否则事后每看一次报告都会显示"超时"
+        response.setExpired(isExpired(session, finishedAtOf(session)));
         return response;
     }
 
     /**
      * 在事务提交后自动触发会话分析：保证分析能读取本次提交的全部作答数据。
-     * 分析失败只记录日志，不阻断笔试提交；当前无活动事务（如单元测试）时直接调用。
+     *
+     * <p>用 {@link AnalysisService#triggerAnalyze} 而不是直接 {@code analyzeSession}：
+     * 后者会同步跑完整轮 LLM 分析（30-120 秒），把交卷接口一起拖住，
+     * 用户点完"交卷"要干等一两分钟才跳转成绩页。triggerAnalyze 立即返回、后台生成，
+     * 报告页自身有轮询/流式入口。
      */
     private void triggerAnalysisAfterCommit(Long sessionId) {
         Runnable task = () -> {
             try {
-                analysisService.analyzeSession(sessionId);
+                analysisService.triggerAnalyze(sessionId);
             } catch (Exception e) {
                 log.warn("笔试会话分析自动触发失败: sessionId={}, cause={}", sessionId, e.getMessage());
             }
@@ -269,6 +333,42 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         } else {
             task.run();
         }
+    }
+
+    // ---------------- 计时校验 ----------------
+
+    /** 截止时间 = 开始时间 + 时长限制；未开始计时返回 null */
+    private LocalDateTime deadlineOf(InterviewSession session) {
+        if (session.getStartedAt() == null) {
+            return null;
+        }
+        int limit = session.getTimeLimit() == null ? DEFAULT_TIME_LIMIT : session.getTimeLimit();
+        return session.getStartedAt().plusMinutes(limit);
+    }
+
+    /** 会话结束时刻：已交卷用 completedAt，否则用当前时间 */
+    private LocalDateTime finishedAtOf(InterviewSession session) {
+        return session.getCompletedAt() != null ? session.getCompletedAt() : LocalDateTime.now();
+    }
+
+    /** 以给定时刻判定是否超出「时长限制 + 宽限期」 */
+    private boolean isExpired(InterviewSession session, LocalDateTime at) {
+        LocalDateTime deadline = deadlineOf(session);
+        return deadline != null && at.isAfter(deadline.plusSeconds(SUBMIT_GRACE_SECONDS));
+    }
+
+    /** 实际用时（秒）；未开始计时返回 null */
+    private Long elapsedSecondsOf(InterviewSession session) {
+        if (session.getStartedAt() == null) {
+            return null;
+        }
+        long seconds = Duration.between(session.getStartedAt(), finishedAtOf(session)).getSeconds();
+        return Math.max(0, seconds);
+    }
+
+    /** LocalDateTime → epoch 毫秒（按服务器时区），null 安全 */
+    private Long toEpochMilli(LocalDateTime time) {
+        return time == null ? null : time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     /** 题型权重：单选/多选 3 分，填空 2 分，简答 5 分 */

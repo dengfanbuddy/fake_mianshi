@@ -5,6 +5,7 @@ import com.fakemianshi.dto.AnalysisResultDTO;
 import com.fakemianshi.dto.HistoryStatusDTO;
 import com.fakemianshi.dto.ApiResponse;
 import com.fakemianshi.entity.HistoricalAnalysis;
+import com.fakemianshi.entity.SessionAnalysis;
 import com.fakemianshi.service.AnalysisService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,7 +20,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 面试分析接口。
@@ -34,8 +35,15 @@ public class AnalysisController {
 
     private final AnalysisService analysisService;
 
-    /** 分析流式推送用线程池 */
-    private final ExecutorService sseExecutor = Executors.newCachedThreadPool();
+    /** 等待后台生成中的分析落库的最长时间（毫秒）：略短于 SSE 的 420 秒空闲上限 */
+    private static final long ANALYZE_WAIT_TIMEOUT_MS = 240_000L;
+
+    /** 等待期间轮询分析的间隔（毫秒） */
+    private static final long ANALYZE_POLL_INTERVAL_MS = 1000L;
+
+    /** 分析流式推送用线程池（有界：单任务最长可占线程数分钟） */
+    private final ExecutorService sseExecutor =
+            com.fakemianshi.config.AppExecutors.bounded("analysis-sse", 4, 8);
 
     @PreDestroy
     public void shutdown() {
@@ -86,44 +94,94 @@ public class AnalysisController {
             }
             analysisService.deleteAnalysis(sessionId);
         } catch (ResourceNotFoundException ignored) {
-            // 未生成，进入流式生成（同样先检查是否已有生成任务在跑）
-            if (analysisService.isAnalyzing(sessionId)) {
-                try {
-                    emitter.send(SseEmitter.event().name("error")
-                            .data("分析正在生成中，请稍候刷新查看"));
-                } catch (IOException ignored2) {
-                    // 客户端已断开
-                }
-                emitter.complete();
-                return emitter;
-            }
+            // 未生成：进入流式生成。若已有后台任务在跑（如交卷后自动触发），
+            // 交给下面执行体里的等待逻辑，不再提前返回"正在生成中"的错误。
         } catch (IOException e) {
             emitter.complete();
             return emitter;
         }
 
-        sseExecutor.execute(() -> {
-            try {
-                // 内容增量推送 delta；思考型模型的思考过程推送 reasoning（前端展示"思考中"）
-                analysisService.analyzeSessionStream(sessionId,
-                        delta -> sendOrThrow(emitter, "delta", delta),
-                        reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
-                // 生成完成后推送完整报告
-                AnalysisResultDTO dto = analysisService.getSessionAnalysis(sessionId);
-                emitter.send(SseEmitter.event().name("done").data(dto));
-                emitter.complete();
-            } catch (Exception e) {
-                log.warn("流式分析失败: sessionId={}, cause={}", sessionId, e.getMessage());
+        try {
+            sseExecutor.execute(() -> {
                 try {
-                    emitter.send(SseEmitter.event().name("error").data(
-                            "分析生成失败：" + (e.getMessage() == null ? "未知错误" : e.getMessage())));
-                } catch (IOException ignored) {
-                    // 客户端已断开
+                    AnalysisResultDTO dto = null;
+                    if (!analysisService.isAnalyzing(sessionId)) {
+                        // 没人在生成就自己流式生成；若恰好被后台任务抢先（analyzingSessions 已在生成），
+                        // 该方法会立即返回 null，走下面的等待分支
+                        SessionAnalysis generated = analysisService.analyzeSessionStream(sessionId,
+                                delta -> sendOrThrow(emitter, "delta", delta),
+                                reasoning -> sendOrThrow(emitter, "reasoning", reasoning));
+                        if (generated != null) {
+                            // 生成完成后推送完整报告
+                            dto = analysisService.getSessionAnalysis(sessionId);
+                        }
+                    }
+                    if (dto == null) {
+                        // 已有任务在生成（典型场景：交卷/结束面试后自动触发）：等它出结果再推送。
+                        // 这里不能直接报"正在生成中"——用户从成绩页点进报告就会看到一个失败面板。
+                        dto = awaitGeneratedAnalysis(sessionId, emitter);
+                    }
+                    if (dto == null) {
+                        emitter.send(SseEmitter.event().name("error").data("分析仍在生成中，请稍候刷新查看"));
+                    } else {
+                        emitter.send(SseEmitter.event().name("done").data(dto));
+                    }
+                    emitter.complete();
+                } catch (Exception e) {
+                    log.warn("流式分析失败: sessionId={}, cause={}", sessionId, e.getMessage());
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(
+                                "分析生成失败：" + (e.getMessage() == null ? "未知错误" : e.getMessage())));
+                    } catch (IOException ignored) {
+                        // 客户端已断开
+                    }
+                    emitter.complete();
                 }
-                emitter.complete();
+            });
+        } catch (RejectedExecutionException e) {
+            // 线程池有界：并发分析任务占满时明确告知（前端会退回轮询，仍能拿到结果）
+            log.warn("分析任务并发已满，拒绝新请求: sessionId={}", sessionId);
+            try {
+                emitter.send(SseEmitter.event().name("error").data("当前分析任务较多，请稍后刷新重试"));
+            } catch (IOException ignored) {
+                // 客户端已断开
             }
-        });
+            emitter.complete();
+        }
         return emitter;
+    }
+
+    /**
+     * 等待后台正在生成的分析落库后再返回。
+     *
+     * <p>等待期间只发 SSE 注释行做保活与断连探测（前端不会触发任何监听事件），
+     * 前端 8 秒收不到输出会自动切到轮询兜底，两条路都能拿到结果。
+     *
+     * @return 分析报告；超时、生成失败或客户端已断开时返回 null
+     */
+    private AnalysisResultDTO awaitGeneratedAnalysis(Long sessionId, SseEmitter emitter) {
+        long deadline = System.currentTimeMillis() + ANALYZE_WAIT_TIMEOUT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            if (!analysisService.isAnalyzing(sessionId)) {
+                try {
+                    return analysisService.getSessionAnalysis(sessionId);
+                } catch (ResourceNotFoundException e) {
+                    // 生成已结束但没有结果（失败）或后台任务还没真正开始，继续短暂等待
+                }
+            }
+            try {
+                // 注释行只用于探活：send 抛 IOException 说明客户端已断开，没必要继续等
+                emitter.send(SseEmitter.event().comment("waiting-analysis"));
+                Thread.sleep(ANALYZE_POLL_INTERVAL_MS);
+            } catch (IOException e) {
+                log.debug("等待分析期间客户端已断开: sessionId={}", sessionId);
+                return null;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+        return null;
     }
 
     /** SSE 推送工具：客户端断开时以 RuntimeException 中断生成任务 */

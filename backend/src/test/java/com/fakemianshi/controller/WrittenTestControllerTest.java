@@ -1,5 +1,6 @@
 package com.fakemianshi.controller;
 
+import com.fakemianshi.config.BusinessException;
 import com.fakemianshi.entity.InterviewProject;
 import com.fakemianshi.entity.InterviewSession;
 import com.fakemianshi.entity.WrittenTestQuestion;
@@ -20,10 +21,12 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
@@ -128,7 +131,7 @@ class WrittenTestControllerTest {
 
     @Test
     void start_shouldReturnQuestionsWithoutAnswers() throws Exception {
-        String body = mockMvc.perform(post("/written-test/start/{projectId}", projectId)
+        String body = mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"timeLimit\":45,\"questionCount\":6}"))
                 .andExpect(status().isOk())
@@ -159,7 +162,7 @@ class WrittenTestControllerTest {
 
     @Test
     void start_shouldApplyDefaults() throws Exception {
-        String body = mockMvc.perform(post("/written-test/start/{projectId}", projectId)
+        String body = mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isOk())
@@ -171,13 +174,74 @@ class WrittenTestControllerTest {
         verify(questionGenerationService).generateWrittenTestQuestions(anyLong(), anyLong(), eq(12));
     }
 
+    /** 服务端下发权威截止时间：deadline = startedAt + timeLimit，前端不再自行推导 */
+    @Test
+    void start_shouldExposeServerSideDeadline() throws Exception {
+        String body = mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timeLimit\":45,\"questionCount\":6}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.startedAt").isNumber())
+                .andExpect(jsonPath("$.data.deadline").isNumber())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode data = objectMapper.readTree(body).path("data");
+        long startedAt = data.path("startedAt").asLong();
+        long deadline = data.path("deadline").asLong();
+        assertThat(deadline - startedAt).isEqualTo(45 * 60 * 1000L);
+    }
+
+    /**
+     * 计时在出题完成之后才开始：出题（LLM，可能几十秒）不应该吃掉用户的选择时长。
+     * 旧实现在创建会话时就写 startedAt，用户还没看到题目就已经被扣掉一两分钟。
+     */
+    @Test
+    void start_shouldBeginClockOnlyAfterQuestionsGenerated() throws Exception {
+        AtomicReference<LocalDateTime> generatedAt = new AtomicReference<>();
+        when(questionGenerationService.generateWrittenTestQuestions(anyLong(), anyLong(), anyInt()))
+                .thenAnswer(invocation -> {
+                    Long sessionId = invocation.getArgument(0);
+                    List<WrittenTestQuestion> saved = persistQuestions(fixedQuestions(), sessionId);
+                    generatedAt.set(LocalDateTime.now());
+                    return saved;
+                });
+
+        String body = mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timeLimit\":60,\"questionCount\":6}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Long sessionId = objectMapper.readTree(body).path("data").path("sessionId").asLong();
+        InterviewSession session = sessionRepository.selectById(sessionId);
+        assertThat(session.getStartedAt()).isNotNull();
+        assertThat(generatedAt.get()).isNotNull();
+        assertThat(session.getStartedAt()).isAfterOrEqualTo(generatedAt.get());
+    }
+
+    /** 出题失败时清理孤儿会话，避免 IN_PROGRESS 的空考试堆积 */
+    @Test
+    void start_shouldDiscardSession_whenGenerationFails() throws Exception {
+        when(questionGenerationService.generateWrittenTestQuestions(anyLong(), anyLong(), anyInt()))
+                .thenThrow(new BusinessException("题目生成格式异常，请重试"));
+
+        long before = sessionRepository.selectCount(null);
+
+        mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"timeLimit\":60,\"questionCount\":6}"))
+                .andExpect(status().isBadRequest());
+
+        assertThat(sessionRepository.selectCount(null)).isEqualTo(before);
+    }
+
     // ---------- submit ----------
 
     @Test
     void submit_shouldGradeAllQuestionTypesAndComputeTotalScore() throws Exception {
         StartData data = startTest();
 
-        mockMvc.perform(post("/written-test/submit/{sessionId}", data.sessionId)
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(buildAnswersJson(data.questionIds)))
                 .andExpect(status().isOk())
@@ -225,12 +289,12 @@ class WrittenTestControllerTest {
         StartData data = startTest();
         String answersJson = buildAnswersJson(data.questionIds);
 
-        mockMvc.perform(post("/written-test/submit/{sessionId}", data.sessionId)
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(answersJson))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/written-test/submit/{sessionId}", data.sessionId)
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(answersJson))
                 .andExpect(status().isBadRequest())
@@ -240,7 +304,7 @@ class WrittenTestControllerTest {
 
     @Test
     void submit_shouldReject_whenSessionNotFound() throws Exception {
-        mockMvc.perform(post("/written-test/submit/{sessionId}", 999999L)
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", 999999L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"answers\":{}}"))
                 .andExpect(status().isBadRequest())
@@ -248,17 +312,66 @@ class WrittenTestControllerTest {
                 .andExpect(jsonPath("$.message").value("笔试已提交或不存在"));
     }
 
+    /** 正常在时限内交卷：不打超时标记 */
+    @Test
+    void submit_shouldNotFlagExpired_withinTimeLimit() throws Exception {
+        StartData data = startTest();
+
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(buildAnswersJson(data.questionIds)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.expired").value(false))
+                .andExpect(jsonPath("$.data.timeLimit").value(60))
+                .andExpect(jsonPath("$.data.elapsedSeconds").isNumber());
+    }
+
+    /** 服务端计时校验：把开始时间改到 2 小时前（时限 60 分钟）→ 判定超时，但作答照常判分入库 */
+    @Test
+    void submit_shouldFlagExpired_whenBeyondTimeLimit() throws Exception {
+        StartData data = startTest();
+        InterviewSession session = sessionRepository.selectById(data.sessionId);
+        session.setStartedAt(LocalDateTime.now().minusMinutes(120));
+        sessionRepository.updateById(session);
+
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(buildAnswersJson(data.questionIds)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.expired").value(true))
+                // 超时不销毁作答：照常判分
+                .andExpect(jsonPath("$.data.totalScore").value(42.1))
+                .andExpect(jsonPath("$.data.correctCount").value(3));
+
+        assertThat(answerRepository.findBySessionId(data.sessionId)).hasSize(6);
+    }
+
+    /** 宽限期内的延迟提交（自动交卷的网络延迟）不算超时 */
+    @Test
+    void submit_shouldNotFlagExpired_withinGracePeriod() throws Exception {
+        StartData data = startTest();
+        InterviewSession session = sessionRepository.selectById(data.sessionId);
+        session.setStartedAt(LocalDateTime.now().minusMinutes(60).minusSeconds(10));
+        sessionRepository.updateById(session);
+
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(buildAnswersJson(data.questionIds)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.expired").value(false));
+    }
+
     // ---------- detail ----------
 
     @Test
     void getDetail_shouldReturnFullInfo() throws Exception {
         StartData data = startTest();
-        mockMvc.perform(post("/written-test/submit/{sessionId}", data.sessionId)
+        mockMvc.perform(post("/api/written-test/submit/{sessionId}", data.sessionId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(buildAnswersJson(data.questionIds)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/written-test/{sessionId}", data.sessionId))
+        mockMvc.perform(get("/api/written-test/{sessionId}", data.sessionId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.sessionId").value(data.sessionId))
@@ -272,12 +385,16 @@ class WrittenTestControllerTest {
                 .andExpect(jsonPath("$.data.results[0].explanation").value("synchronized 是并发关键字"))
                 .andExpect(jsonPath("$.data.results[5].type").value("SHORT_ANSWER"))
                 .andExpect(jsonPath("$.data.results[5].isCorrect").value(nullValue()))
-                .andExpect(jsonPath("$.data.results[5].explanation").value("考察集合知识"));
+                .andExpect(jsonPath("$.data.results[5].explanation").value("考察集合知识"))
+                // 报告页超时提示所需字段（按交卷时刻判定，不会因为事后查看而变成超时）
+                .andExpect(jsonPath("$.data.timeLimit").value(60))
+                .andExpect(jsonPath("$.data.elapsedSeconds").isNumber())
+                .andExpect(jsonPath("$.data.expired").value(false));
     }
 
     @Test
     void getDetail_shouldReturn404_whenSessionNotFound() throws Exception {
-        mockMvc.perform(get("/written-test/{sessionId}", 999999L))
+        mockMvc.perform(get("/api/written-test/{sessionId}", 999999L))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
     }
@@ -286,7 +403,7 @@ class WrittenTestControllerTest {
 
     /** 开始一场笔试并返回会话 id 与题目 id 列表 */
     private StartData startTest() throws Exception {
-        String body = mockMvc.perform(post("/written-test/start/{projectId}", projectId)
+        String body = mockMvc.perform(post("/api/written-test/start/{projectId}", projectId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"timeLimit\":60,\"questionCount\":6}"))
                 .andExpect(status().isOk())

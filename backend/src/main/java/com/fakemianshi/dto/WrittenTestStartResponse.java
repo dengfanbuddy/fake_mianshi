@@ -19,6 +19,12 @@ public class WrittenTestStartResponse {
     /** 考试开始时间（epoch 毫秒），前端据此计算截止时间，避免刷新后重置倒计时 */
     private Long startedAt;
 
+    /**
+     * 服务端权威截止时间（epoch 毫秒）= startedAt + timeLimit。
+     * 前端只负责展示，不再自行推导，避免用户改本地时间/缓存绕过计时。
+     */
+    private Long deadline;
+
     /** 题目列表（不包含答案与解析） */
     private List<ExamQuestion> questions;
 }

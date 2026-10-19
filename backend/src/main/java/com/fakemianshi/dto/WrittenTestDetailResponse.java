@@ -18,4 +18,13 @@ public class WrittenTestDetailResponse {
 
     /** 总分（从作答记录汇总，100 制，保留 1 位小数） */
     private Double totalScore;
+
+    /** 考试时长限制（分钟） */
+    private Integer timeLimit;
+
+    /** 实际用时（秒，从开始到交卷） */
+    private Long elapsedSeconds;
+
+    /** 是否超时提交（超出时长限制 + 宽限期）；报告页据此提示成绩仅供参考 */
+    private Boolean expired;
 }

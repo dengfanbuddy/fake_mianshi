@@ -17,7 +17,7 @@ import com.fakemianshi.service.QuestionGenerationService;
 import com.fakemianshi.service.ResumeService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -29,6 +29,9 @@ import java.util.Optional;
 /**
  * 出题引擎实现：将职位需求、简历、弱点标签组装为 LLM 上下文，
  * 调用 LLM 生成笔试题 / 模拟面试大纲 / 面试官开场白。
+ *
+ * <p>事务边界：LLM 调用一律在事务外完成（单次调用可达数十秒，SQLite 写锁会被长期占住，
+ * 导致其他请求写入失败）——只有真正写库的那几步才包进短事务里。
  */
 @Service
 @RequiredArgsConstructor
@@ -47,12 +50,14 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     private final InterviewerPersonaRepository interviewerPersonaRepository;
     private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
     private final com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
+    /** 只用于包住「题目整体落库」这一小段，LLM 调用一律在事务外 */
+    private final TransactionTemplate transactionTemplate;
 
     @Override
-    @Transactional
     public List<WrittenTestQuestion> generateWrittenTestQuestions(Long sessionId, Long projectId, int questionCount) {
         String systemPrompt = buildWrittenTestPrompt(projectId, questionCount);
         String userPrompt = buildContext(projectId);
+        // 长耗时调用必须在事务外，否则整个出题期间都占着数据库连接与写锁
         LlmResponse response = llmService.chat(systemPrompt, userPrompt, LlmServiceImpl.LONG_TASK_MAX_TOKENS);
         List<JsonNode> items = parseQuestionArray(extractJsonSection(response.getContent()));
 
@@ -60,7 +65,6 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     }
 
     @Override
-    @Transactional
     public List<WrittenTestQuestion> generateWrittenTestQuestionsStream(
             Long sessionId, Long projectId, int questionCount,
             java.util.function.Consumer<String> onDelta,
@@ -135,19 +139,25 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
         return output.substring(idx + "==JSON_START==".length());
     }
 
+    /**
+     * 题目落库：整批要么全成功要么全失败（避免出现"12 道题只存了 7 道"的残缺考试）。
+     * 事务只包这一段，LLM 调用已在此之前完成。
+     */
     private List<WrittenTestQuestion> saveQuestions(List<JsonNode> items, Long sessionId) {
-        List<WrittenTestQuestion> questions = new ArrayList<>();
-        int orderNum = 1;
-        for (JsonNode item : items) {
-            WrittenTestQuestion question = toQuestion(item, sessionId, orderNum++);
-            writtenTestQuestionRepository.insert(question);
-            questions.add(question);
-        }
-        return questions;
+        List<WrittenTestQuestion> saved = transactionTemplate.execute(status -> {
+            List<WrittenTestQuestion> questions = new ArrayList<>();
+            int orderNum = 1;
+            for (JsonNode item : items) {
+                WrittenTestQuestion question = toQuestion(item, sessionId, orderNum++);
+                writtenTestQuestionRepository.insert(question);
+                questions.add(question);
+            }
+            return questions;
+        });
+        return saved == null ? List.of() : saved;
     }
 
     @Override
-    @Transactional(readOnly = true)
     public String generateMockInterviewOutline(Long projectId) {
         String systemPrompt = promptTemplateService.getTemplate(
                 resolveOccupation(projectId),
@@ -163,7 +173,6 @@ public class QuestionGenerationServiceImpl implements QuestionGenerationService 
     }
 
     @Override
-    @Transactional(readOnly = true)
     public String generateOpeningMessage(Long projectId, Long personaId) {
         InterviewerPersona persona = Optional.ofNullable(interviewerPersonaRepository.selectById(personaId))
                 .orElseThrow(() -> new BusinessException("面试官人设不存在: id=" + personaId));

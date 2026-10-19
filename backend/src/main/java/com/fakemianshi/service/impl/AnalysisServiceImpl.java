@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -51,6 +52,9 @@ import java.util.stream.Collectors;
  * <p>分析流程：组装题目/对话上下文 → 调用 LLM 生成结构化 JSON → 分层容错解析
  * （去围栏 + 截取 JSON 主体 + 整体解析）→ 保存 SessionAnalysis 与 QuestionAnalysis →
  * 自动更新弱点标签。历史分析则跨多次会话汇总趋势与反复弱点。
+ *
+ * <p>事务边界：LLM 调用一律在事务外（单次 30-120 秒，长事务会长期占住 SQLite 写锁，
+ * 且流式场景下一直不提交），只有最终写库的几步用 {@link TransactionTemplate} 包成短事务。
  */
 @Service
 @RequiredArgsConstructor
@@ -128,6 +132,8 @@ public class AnalysisServiceImpl implements AnalysisService {
     private final LlmService llmService;
     private final com.fakemianshi.service.PromptTemplateService promptTemplateService;
     private final com.fakemianshi.repository.InterviewProjectRepository interviewProjectRepository;
+    /** 只用于包住「分析结果落库」这一小段，LLM 调用一律在事务外 */
+    private final TransactionTemplate transactionTemplate;
 
     /** 注入自身代理：异步线程里通过代理调用带 @Transactional 的方法，避免自调用绕过事务 */
     @org.springframework.context.annotation.Lazy
@@ -137,9 +143,9 @@ public class AnalysisServiceImpl implements AnalysisService {
     /** 分析生成中标记（防重复触发） */
     private final java.util.Set<Long> analyzingSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    /** 分析异步生成线程池 */
+    /** 分析异步生成线程池（有界：每个任务耗时数十秒到两分钟） */
     private final java.util.concurrent.ExecutorService analysisExecutor =
-            java.util.concurrent.Executors.newCachedThreadPool();
+            com.fakemianshi.config.AppExecutors.bounded("analysis-worker", 4, 16);
 
     @jakarta.annotation.PreDestroy
     public void shutdown() {
@@ -155,18 +161,29 @@ public class AnalysisServiceImpl implements AnalysisService {
         if (isAnalyzing(sessionId)) {
             return; // 已在生成中
         }
-        analysisExecutor.execute(() -> {
-            try {
-                // 经代理调用，保证 @Transactional 生效（三步写库原子）；analyzeSession 内部有 analyzingSessions 防重
-                self.analyzeSession(sessionId);
-            } catch (Exception e) {
-                log.warn("会话分析异步生成失败: sessionId={}, cause={}", sessionId, e.getMessage());
-            }
-        });
+        try {
+            analysisExecutor.execute(() -> {
+                try {
+                    // analyzeSession 内部用 analyzingSessions 防重；写库阶段自带短事务，无需外层事务
+                    self.analyzeSession(sessionId);
+                } catch (Exception e) {
+                    log.warn("会话分析异步生成失败: sessionId={}, cause={}", sessionId, e.getMessage());
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            // 线程池有界：队列已满说明后台积压，放弃本次自动触发即可——
+            // 报告页自身的 SSE/轮询入口会重新触发，不会导致报告永久缺失
+            log.warn("分析任务队列已满，跳过本次自动触发: sessionId={}", sessionId);
+        }
     }
 
+    /**
+     * 生成并保存会话分析。
+     *
+     * <p>不加 @Transactional：本方法主体是长达数十秒的 LLM 调用，
+     * 只有末尾写库部分在 {@link #persistAnalysis} 里用短事务完成。
+     */
     @Override
-    @Transactional
     public SessionAnalysis analyzeSession(Long sessionId) {
         // 与流式入口统一用 analyzingSessions 防重，避免并发（afterCommit 自动触发 + 手动触发）重复调用 LLM / 重复插库
         if (!analyzingSessions.add(sessionId)) {
@@ -180,8 +197,8 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
     }
 
+    /** 流式生成会话分析（事务边界同 {@link #analyzeSession}） */
     @Override
-    @Transactional
     public SessionAnalysis analyzeSessionStream(Long sessionId, java.util.function.Consumer<String> onDelta,
                                                 java.util.function.Consumer<String> onReasoning) {
         // 防重：已有任务在生成时不再重复调用 LLM（调用方应先检查 isAnalyzing）
@@ -236,22 +253,34 @@ public class AnalysisServiceImpl implements AnalysisService {
         }
 
         SessionAnalysis analysis = toSessionAnalysis(sessionId, analysisNode);
-        sessionAnalysisRepository.insert(analysis);
+        return persistAnalysis(sessionId, session.getProjectId(), type, analysisNode, analysis);
+    }
 
-        for (QuestionAnalysis qa : parseQuestionAnalyses(analysisNode, sessionId, type)) {
-            qa.setSessionId(sessionId);
-            questionAnalysisRepository.insert(qa);
-        }
+    /**
+     * 写库阶段（短事务）：会话分析 + 单题分析 + 简答题评分回流 + 弱点标签，
+     * 四者要么全成功要么全回滚，避免留下"半份分析"被幂等逻辑当成完整结果永久返回。
+     * 此时 LLM 调用已经结束，事务只持续几毫秒。
+     */
+    private SessionAnalysis persistAnalysis(Long sessionId, Long projectId, String type,
+                                            JsonNode analysisNode, SessionAnalysis analysis) {
+        SessionAnalysis saved = transactionTemplate.execute(status -> {
+            sessionAnalysisRepository.insert(analysis);
 
-        // 笔试：把 LLM 对简答题的评分回写到答案，修正总分
-        if (TYPE_WRITTEN.equals(type)) {
-            writeBackShortAnswerScores(sessionId, analysisNode);
-        }
+            for (QuestionAnalysis qa : parseQuestionAnalyses(analysisNode, sessionId, type)) {
+                qa.setSessionId(sessionId);
+                questionAnalysisRepository.insert(qa);
+            }
 
-        // 返回前自动更新弱点标签
-        updateWeaknessTags(session.getProjectId(), sessionId);
+            // 笔试：把 LLM 对简答题的评分回写到答案，修正总分
+            if (TYPE_WRITTEN.equals(type)) {
+                writeBackShortAnswerScores(sessionId, analysisNode);
+            }
 
-        return analysis;
+            // 返回前自动更新弱点标签（自调用，直接加入当前短事务）
+            updateWeaknessTags(projectId, sessionId);
+            return analysis;
+        });
+        return saved == null ? analysis : saved;
     }
 
     /** 项目目标岗位（职业）；无则 null（走 default 模板） */
@@ -277,8 +306,12 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    @Transactional
     public HistoricalAnalysis analyzeHistory(Long projectId) {
+        return saveHistorySnapshot(projectId, generateHistoryNode(projectId));
+    }
+
+    /** 历史综合分析的 LLM 阶段（事务外，可能耗时数十秒） */
+    private JsonNode generateHistoryNode(Long projectId) {
         List<SessionAnalysis> analyses = collectProjectAnalyses(projectId);
         if (analyses.isEmpty()) {
             throw new BusinessException("该项目暂无面试记录");
@@ -288,8 +321,11 @@ public class AnalysisServiceImpl implements AnalysisService {
                 resolveOccupation(projectId),
                 com.fakemianshi.service.PromptTemplateService.Scene.HISTORY_ANALYSIS.name(),
                 resolvePosition(projectId));
-        JsonNode node = callLlm(systemPrompt, buildHistoryUserPrompt(projectId, analyses));
+        return callLlm(systemPrompt, buildHistoryUserPrompt(projectId, analyses));
+    }
 
+    /** 历史分析快照落库（单条 insert，不需要额外事务） */
+    private HistoricalAnalysis saveHistorySnapshot(Long projectId, JsonNode node) {
         HistoricalAnalysis historical = new HistoricalAnalysis();
         historical.setProjectId(projectId);
         historical.setAnalysisData(node.toString());
@@ -337,12 +373,21 @@ public class AnalysisServiceImpl implements AnalysisService {
         return dto;
     }
 
+    /**
+     * 强制重新生成历史综合分析。
+     *
+     * <p>先调用 LLM 生成新快照，成功后才在一个短事务里删除旧快照并写入新的：
+     * 这样 LLM 失败时旧快照仍然保留（原实现先删后生成，一旦失败历史分析就没了）。
+     */
     @Override
-    @Transactional
     public HistoricalAnalysis refreshHistory(Long projectId) {
-        historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(projectId)
-                .forEach(h -> historicalAnalysisRepository.deleteById(h.getId()));
-        return analyzeHistory(projectId);
+        JsonNode node = generateHistoryNode(projectId);
+        HistoricalAnalysis saved = transactionTemplate.execute(status -> {
+            historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(projectId)
+                    .forEach(h -> historicalAnalysisRepository.deleteById(h.getId()));
+            return saveHistorySnapshot(projectId, node);
+        });
+        return saved;
     }
 
     @Override
@@ -473,7 +518,6 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    @Transactional
     public HistoricalAnalysis getLatestHistory(Long projectId) {
         List<HistoricalAnalysis> existing = historicalAnalysisRepository.findByProjectIdOrderByGeneratedAtDesc(projectId);
         if (!existing.isEmpty()) {
@@ -482,8 +526,10 @@ public class AnalysisServiceImpl implements AnalysisService {
         return analyzeHistory(projectId);
     }
 
+    /**
+     * 强制重新生成会话分析：删旧分析（短事务）→ 重新生成（LLM 在事务外）→ 读回展示结构。
+     */
     @Override
-    @Transactional
     public AnalysisResultDTO refreshAnalysis(Long sessionId) {
         deleteAnalysis(sessionId);
         analyzeSession(sessionId);
@@ -491,12 +537,15 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    @Transactional
     public void deleteAnalysis(Long sessionId) {
-        // 先删除旧分析（单题分析 + 会话分析）
-        questionAnalysisRepository.deleteByIds(questionAnalysisRepository.findBySessionId(sessionId).stream().map(QuestionAnalysis::getId).toList());
-        sessionAnalysisRepository.findBySessionId(sessionId)
-                .forEach(a -> sessionAnalysisRepository.deleteById(a.getId()));
+        // 两个删除放在同一短事务里，避免只删掉一半导致重新分析后出现重复的单题分析
+        transactionTemplate.execute(status -> {
+            questionAnalysisRepository.deleteByIds(questionAnalysisRepository.findBySessionId(sessionId)
+                    .stream().map(QuestionAnalysis::getId).toList());
+            sessionAnalysisRepository.findBySessionId(sessionId)
+                    .forEach(a -> sessionAnalysisRepository.deleteById(a.getId()));
+            return null;
+        });
     }
 
     // ---------------- 内部方法 ----------------
