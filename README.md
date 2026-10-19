@@ -77,6 +77,10 @@ pwsh -File scripts/download_model.ps1 -Model Qwen/Qwen3-ASR-0.6B-hf  # ASR 权�
 自检（延迟/显存/音质）：`cd voice-service && uv run python selfcheck.py`；
 识别基准：`uv run python scripts/bench_asr.py`（TTS→ASR 闭环）。详见 `voice-service/README.md`。
 
+识别准不准很依赖**热词**：设置页「识别热词」可编辑（存库、立即生效，留空则用内置技术热词表）。
+实测不加时 `JVM`→`JYEM`、`gRPC`→`GRPC`、`etcd`→`ATCD`；**热词的大小写会被照抄**，
+所以按你希望输出的写法填（`ETCD` 而不是 `etcd`）。
+
 > 本地识别的「边说边出字」不是模型级流式（真流式要 vLLM，没有 Windows 轮子），而是每 ~2s 把累积
 > 音频重识别一次。想更快出最终结果，把 `VOICE_LOCAL_ASR_PARTIAL_MS=0` 关掉中间结果即可。
 > 取舍见 `docs/adr/0010-local-qwen-asr.md`。
@@ -84,7 +88,7 @@ pwsh -File scripts/download_model.ps1 -Model Qwen/Qwen3-ASR-0.6B-hf  # ASR 权�
 ## 测试与发布
 
 ```bash
-# 后端测试（目前 172 个，全部通过）
+# 后端测试（目前 181 个，全部通过）
 cd backend && ./mvnw.cmd -o test
 
 # 前端生产构建（产物在 frontend/dist）
