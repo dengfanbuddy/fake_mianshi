@@ -154,7 +154,10 @@ CREATE TABLE IF NOT EXISTS written_test_answer (
     session_id  BIGINT NOT NULL,
     user_answer VARCHAR(5000),
     is_correct  BOOLEAN,
-    score       FLOAT
+    score       FLOAT,
+    -- 错题本：订正成功的时间（NULL = 待订正）与重练次数
+    corrected_at VARCHAR(40),
+    retry_count  INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS written_test_question (

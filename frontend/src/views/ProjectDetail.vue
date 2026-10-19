@@ -273,7 +273,7 @@ onMounted(() => {
     />
 
     <!-- 弱点标签卡 -->
-    <WeaknessPanel :tags="weaknessTags" :loading="weaknessLoading" />
+    <WeaknessPanel :tags="weaknessTags" :loading="weaknessLoading" :project-id="projectId" />
 
     <!-- 历史分析卡 -->
     <HistoryAnalysisCard @open="goHistoryAnalysis" />

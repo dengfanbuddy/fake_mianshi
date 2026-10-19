@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { useRouter } from 'vue-router'
+
+const props = defineProps({
   tags: {
     type: Array,
     default: () => [],
@@ -8,7 +10,14 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  /** 有项目 ID 时才显示「去复习」入口（错题本按项目维度组织） */
+  projectId: {
+    type: [Number, String],
+    default: null,
+  },
 })
+
+const router = useRouter()
 
 const masteryTagMap = {
   WEAK: { type: 'danger', label: '薄弱' },
@@ -20,11 +29,24 @@ const masteryTagMap = {
 function masteryMeta(level) {
   return masteryTagMap[level] || { type: 'info', label: level || '未知' }
 }
+
+/** 薄弱点 → 错题本：闭环的入口在这里，用户看完报告能直接去练 */
+function goReview() {
+  if (!props.projectId) return
+  router.push(`/review/${props.projectId}`)
+}
 </script>
 
 <template>
   <el-card class="section" shadow="never">
-    <template #header><span>薄弱知识点</span></template>
+    <template #header>
+      <div class="panel-head">
+        <span>薄弱知识点</span>
+        <el-button v-if="projectId" type="primary" size="small" text @click="goReview">
+          去错题本复习 →
+        </el-button>
+      </div>
+    </template>
 
     <div v-loading="loading" class="section-body">
       <div v-if="tags.length" class="weakness-list">
@@ -48,6 +70,11 @@ function masteryMeta(level) {
 <style scoped>
 .section {
   margin-bottom: 20px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 /* 弱点 */

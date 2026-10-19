@@ -10,6 +10,8 @@ const activeMenu = computed(() => {
   const p = route.path
   if (p.startsWith('/settings')) return '/settings'
   if (p.startsWith('/help') || p.startsWith('/docs')) return '/help'
+  // 错题本从侧边栏直接进，不归属项目列表
+  if (p.startsWith('/review')) return '/review'
   if (
     p.startsWith('/projects') ||
     p.startsWith('/project') ||
@@ -49,6 +51,10 @@ const activeMenu = computed(() => {
         <el-menu-item index="/projects">
           <span class="menu-icon">📁</span>
           <span>项目管理</span>
+        </el-menu-item>
+        <el-menu-item index="/review">
+          <span class="menu-icon">📕</span>
+          <span>错题本</span>
         </el-menu-item>
         <el-menu-item index="/settings">
           <span class="menu-icon">⚙️</span>

@@ -61,6 +61,10 @@ public class DatabaseMigration {
             // voice_config：识别热词改为页面可编辑（本地 ASR 的 system prompt 偏置）
             ensureColumn(conn, "voice_config", "asr_prompt", "VARCHAR(2000)");
 
+            // written_test_answer：错题本需要记录「订正」状态与重练次数
+            ensureColumn(conn, "written_test_answer", "corrected_at", "VARCHAR(40)");
+            ensureColumn(conn, "written_test_answer", "retry_count", "INTEGER DEFAULT 0");
+
             log.info("数据库迁移检查完成");
         } catch (Exception e) {
             log.warn("数据库迁移失败（可忽略，后续启动会重试）: {}", e.getMessage());

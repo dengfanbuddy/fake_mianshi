@@ -19,6 +19,7 @@ import com.fakemianshi.service.AnalysisService;
 import com.fakemianshi.service.ProjectService;
 import com.fakemianshi.service.QuestionGenerationService;
 import com.fakemianshi.service.WrittenTestService;
+import com.fakemianshi.util.WrittenTestGrader;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -384,32 +385,14 @@ public class WrittenTestServiceImpl implements WrittenTestService {
         };
     }
 
-    /** 逐题判分（简答题不进入此流程） */
+    /** 逐题判分（简答题不进入此流程）。实现见 {@link WrittenTestGrader}，错题本重练共用同一份 */
     private boolean grade(WrittenTestQuestion question, String userAnswer) {
-        if (userAnswer == null || userAnswer.trim().isEmpty()) {
-            return false;
-        }
-        String submitted = userAnswer.trim();
-        String correct = question.getAnswer() == null ? "" : question.getAnswer().trim();
-        return switch (question.getType() == null ? "" : question.getType()) {
-            case TYPE_SINGLE -> submitted.equalsIgnoreCase(correct);
-            case TYPE_MULTIPLE -> normalizeMultiple(submitted).equals(normalizeMultiple(correct));
-            case TYPE_FILL -> submitted.equalsIgnoreCase(correct);
-            default -> false;
-        };
+        return WrittenTestGrader.grade(question.getType(), question.getAnswer(), userAnswer);
     }
 
-    /** 多选答案规范化：去除空白/分隔符、转大写并按字母排序（"ACB"、"A,C,B" 均归为 "ABC"） */
+    /** 多选答案规范化（委托给共用实现） */
     private String normalizeMultiple(String answer) {
-        if (answer == null) {
-            return "";
-        }
-        return answer.toUpperCase()
-                .replaceAll("[^A-Z]", "")
-                .chars()
-                .sorted()
-                .collect(StringBuilder::new, (sb, c) -> sb.append((char) c), StringBuilder::append)
-                .toString();
+        return WrittenTestGrader.normalizeMultiple(answer);
     }
 
     /** 100 制归一化并保留 1 位小数 */

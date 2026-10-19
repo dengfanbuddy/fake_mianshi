@@ -66,6 +66,12 @@ const routes = [
         name: 'HistoryReport',
         component: () => import('../views/analysis/HistoryReport.vue'),
       },
+      {
+        // 不带 projectId 时页面自己挑第一个项目，保证从侧边栏随时可进
+        path: 'review/:projectId?',
+        name: 'ReviewBook',
+        component: () => import('../views/review/ReviewBook.vue'),
+      },
     ],
   },
 ]
