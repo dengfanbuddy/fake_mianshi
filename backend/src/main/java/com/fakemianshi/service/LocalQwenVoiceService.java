@@ -16,6 +16,7 @@ import tools.jackson.databind.node.ObjectNode;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -93,7 +94,83 @@ public class LocalQwenVoiceService implements VoiceService {
 
     @Override
     public String recognizeSpeech(byte[] audioData) {
-        throw new BusinessException("本地 Qwen ASR 尚未接入（P1 阶段），请暂时使用腾讯云语音识别");
+        return transcribe(audioData, true, properties.getLocal().getSampleRate()).text();
+    }
+
+    /**
+     * 识别一段音频，返回文本 + 语种 + 性能指标。
+     *
+     * @param audio      音频字节；{@code wav=true} 时是带 RIFF 头的文件，否则是裸 PCM16LE
+     * @param wav        是否带容器头
+     * @param sampleRate 裸 PCM 的采样率（带头的以文件为准）
+     */
+    public AsrResult transcribe(byte[] audio, boolean wav, int sampleRate) {
+        if (audio == null || audio.length == 0) {
+            return new AsrResult("", null, 0, 0, true);
+        }
+        VoiceProperties.Asr asr = properties.getLocal().getAsr();
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(asrUrl(asr)))
+                .timeout(Duration.ofSeconds(asr.getTimeoutSeconds()))
+                .header("Content-Type", wav ? "audio/wav" : "application/octet-stream");
+        if (!wav) {
+            builder.header("X-Sample-Rate", String.valueOf(sampleRate));
+        }
+        HttpRequest request = builder.POST(HttpRequest.BodyPublishers.ofByteArray(audio)).build();
+
+        HttpResponse<byte[]> response;
+        try {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new BusinessException("本地语音识别调用失败: " + e.getMessage()
+                    + "（请确认 voice-service 已启动：设置页「启动本地服务」或 voice-service/run.ps1）", e);
+        }
+        int status = response.statusCode();
+        if (status < 200 || status >= 300) {
+            String detail = new String(response.body(), StandardCharsets.UTF_8);
+            throw new BusinessException("本地语音识别失败，状态码: " + status + "，响应: " + detail);
+        }
+        try {
+            JsonNode node = MAPPER.readTree(response.body());
+            return new AsrResult(
+                    node.path("text").asText(""),
+                    node.path("language").isNull() ? null : node.path("language").asText(null),
+                    node.path("audio_seconds").asDouble(0),
+                    node.path("rtf").asDouble(0),
+                    !node.path("skipped").isNull() && !node.path("skipped").isMissingNode());
+        } catch (JacksonException e) {
+            throw new BusinessException("本地语音识别结果解析失败: " + e.getMessage(), e);
+        }
+    }
+
+    /** 裸 PCM16 识别（WebSocket 路径直接用累积缓冲，省掉一次 WAV 封装） */
+    public String recognizePcm16(byte[] pcm, int sampleRate) {
+        return transcribe(pcm, false, sampleRate).text();
+    }
+
+    /** ``/asr`` 地址：带上配置里的语种与领域热词（都为空则不带参数） */
+    private String asrUrl(VoiceProperties.Asr asr) {
+        StringBuilder url = new StringBuilder(baseUrl()).append("/asr");
+        char sep = '?';
+        if (asr.getLanguage() != null && !asr.getLanguage().isBlank()) {
+            url.append(sep).append("language=").append(urlEncode(asr.getLanguage().trim()));
+            sep = '&';
+        }
+        if (asr.getPrompt() != null && !asr.getPrompt().isBlank()) {
+            url.append(sep).append("prompt=").append(urlEncode(asr.getPrompt().trim()));
+        }
+        return url.toString();
+    }
+
+    private static String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    /** 识别结果：文本 + 语种 + 性能指标 */
+    public record AsrResult(String text, String language, double audioSeconds, double rtf, boolean skipped) {
     }
 
     @Override
@@ -234,6 +311,17 @@ public class LocalQwenVoiceService implements VoiceService {
                         ? null : node.path("load_seconds").asDouble());
                 result.put("loadError", node.path("load_error").isNull()
                         ? null : node.path("load_error").asText());
+                JsonNode asrNode = node.path("asr");
+                if (!asrNode.isMissingNode() && !asrNode.isNull()) {
+                    result.put("asrEnabled", asrNode.path("enabled").asBoolean(false));
+                    result.put("asrLoaded", asrNode.path("loaded").asBoolean(false));
+                    result.put("asrModel", asrNode.path("model").asText(null));
+                    result.put("asrDevice", asrNode.path("device").asText(null));
+                    result.put("asrLanguage", asrNode.path("language").isNull()
+                            ? null : asrNode.path("language").asText(null));
+                    result.put("asrLoadError", asrNode.path("load_error").isNull()
+                            ? null : asrNode.path("load_error").asText());
+                }
             }
             return result;
         } catch (IOException | InterruptedException | JacksonException e) {

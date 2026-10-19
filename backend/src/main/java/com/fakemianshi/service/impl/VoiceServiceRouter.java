@@ -21,7 +21,9 @@ import java.util.function.Consumer;
  * <p>标记 {@link Primary}，全项目注入 {@link VoiceService} 的地方都会拿到它，
  * 上层业务（逐句流式 TTS、语音识别）无需感知供应商差异。
  *
- * <p>P0 阶段：TTS 支持双供应商；ASR 仍固定走腾讯云（本地 Qwen ASR 待 P1 接入）。
+ * <p>TTS 与 ASR 都支持双供应商：本地侧的 Qwen3-TTS 与 Qwen3-ASR 跑在同一个 voice-service
+ * 进程里（transformers 原生支持两张模型），腾讯云侧沿用原有的实时识别与基础合成。
+ * 本地失败时按 {@code app.voice.local.fallback-to-tencent} 决定是否回退腾讯云。
  */
 @Slf4j
 @Primary
@@ -39,6 +41,16 @@ public class VoiceServiceRouter implements VoiceService {
     public boolean activeIsLocal() {
         VoiceConfig cfg = voiceConfigService.resolveActive();
         return cfg != null && cfg.isLocalProvider();
+    }
+
+    /**
+     * 实时识别（WebSocket 路径）是否应走本地 Qwen3-ASR。
+     *
+     * <p>与 {@link #activeIsLocal()} 的差别是还要求 ASR 没被单独关掉——
+     * 有人可能想用本地合成 + 腾讯云识别（比如显卡被别的任务占着）。
+     */
+    public boolean activeAsrIsLocal() {
+        return activeIsLocal() && voiceProperties.getLocal().getAsr().isEnabled();
     }
 
     /** 当前生效供应商名（前端展示用） */
@@ -63,16 +75,25 @@ public class VoiceServiceRouter implements VoiceService {
 
     @Override
     public String recognizeSpeech(byte[] audioData) {
-        // P0：本地 Qwen ASR 尚未接入，识别固定走腾讯云
-        try {
+        if (!activeAsrIsLocal()) {
             return tencentVoiceService.recognizeSpeech(audioData);
-        } catch (BusinessException e) {
-            if (activeIsLocal()) {
-                throw new BusinessException(
-                        "当前语音供应商为本地 Qwen，但本地 ASR 尚未接入（P1 阶段）；"
-                                + "语音识别仍需配置腾讯云密钥。原始错误: " + e.getMessage(), e);
+        }
+        try {
+            return localQwenVoiceService.recognizeSpeech(audioData);
+        } catch (RuntimeException e) {
+            if (!shouldFallback()) {
+                // 没有腾讯云兜底时，把本地失败原因原样抛出（比"未配置密钥"有用得多）
+                throw e instanceof BusinessException be ? be
+                        : new BusinessException("本地语音识别失败: " + e.getMessage(), e);
             }
-            throw e;
+            log.warn("本地 ASR 失败，回退腾讯云: {}", e.getMessage());
+            try {
+                return tencentVoiceService.recognizeSpeech(audioData);
+            } catch (BusinessException fallbackError) {
+                // 两边都不可用时，优先报本地原因（用户刚配的是本地）
+                throw new BusinessException("本地语音识别失败（" + e.getMessage()
+                        + "），且回退腾讯云也失败（" + fallbackError.getMessage() + "）", e);
+            }
         }
     }
 

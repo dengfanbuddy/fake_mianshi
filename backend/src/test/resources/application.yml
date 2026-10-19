@@ -31,3 +31,6 @@ app:
       auto-start: false
       stop-on-shutdown: false
       pid-file: target/test-voice-sidecar.pid
+      # 关掉本地识别，避免任何测试意外打到真实 sidecar
+      asr:
+        enabled: false

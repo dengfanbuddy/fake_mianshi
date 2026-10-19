@@ -1,11 +1,14 @@
 package com.fakemianshi.voice;
 
+import com.fakemianshi.config.VoiceProperties;
 import com.fakemianshi.dto.MockInterviewRespondRequest;
 import com.fakemianshi.dto.MockInterviewRespondResponse;
 import com.fakemianshi.entity.VoiceConfig;
+import com.fakemianshi.service.LocalQwenVoiceService;
 import com.fakemianshi.service.MockInterviewService;
 import com.fakemianshi.service.StreamEventSink;
 import com.fakemianshi.service.VoiceConfigService;
+import com.fakemianshi.service.impl.VoiceServiceRouter;
 import com.fakemianshi.util.AudioStorageUtil;
 import com.fakemianshi.util.WavAudio;
 import lombok.RequiredArgsConstructor;
@@ -51,6 +54,9 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
     private final MockInterviewService mockInterviewService;
     private final VoiceConfigService voiceConfigService;
     private final AudioStorageUtil audioStorageUtil;
+    private final VoiceServiceRouter voiceServiceRouter;
+    private final LocalQwenVoiceService localQwenVoiceService;
+    private final VoiceProperties voiceProperties;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -62,7 +68,7 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
     /** 每个浏览器 WebSocket 会话的流式状态 */
     private static final class SessionState {
         Long sessionId;
-        TencentAsrSession asrSession;
+        AsrSession asrSession;
         final ByteArrayOutputStream pcmBuffer = new ByteArrayOutputStream();
         volatile String candidateAudioPath;
         volatile boolean replyStarted;
@@ -124,6 +130,18 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
         state.candidateAudioPath = null;
         state.pcmBuffer.reset();
 
+        // 本地 Qwen 供应商：识别在 voice-service 里跑，不需要任何云端密钥/AppId
+        if (voiceServiceRouter.activeAsrIsLocal()) {
+            try {
+                state.asrSession = LocalAsrSession.open(localQwenVoiceService,
+                        voiceProperties.getLocal().getAsr(), listenerOf(session, state));
+                sendJson(session, "ready", Map.of("engine", "local_qwen"));
+            } catch (Exception e) {
+                sendError(session, "本地语音识别初始化失败: " + e.getMessage());
+            }
+            return;
+        }
+
         VoiceConfig cfg = voiceConfigService.resolveActive();
         if (cfg == null || !cfg.isConfigured()) {
             sendError(session, "未配置腾讯云 SecretId/SecretKey，请在设置页填写并保存");
@@ -136,26 +154,31 @@ public class InterviewVoiceWebSocketHandler extends TextWebSocketHandler {
         try {
             state.asrSession = TencentAsrSession.open(
                     cfg.getSecretId(), cfg.getSecretKey(), cfg.getAppId(),
-                    new TencentAsrSession.Listener() {
-                        @Override
-                        public void onPartialResult(String text) {
-                            sendJson(session, "partial", Map.of("text", text == null ? "" : text));
-                        }
-
-                        @Override
-                        public void onFinalResult(String text) {
-                            startReply(session, state, text);
-                        }
-
-                        @Override
-                        public void onError(String message) {
-                            sendError(session, message);
-                        }
-                    }, httpClient);
-            sendJson(session, "ready", Map.of());
+                    listenerOf(session, state), httpClient);
+            sendJson(session, "ready", Map.of("engine", "tencent"));
         } catch (Exception e) {
             sendError(session, "实时语音识别连接失败: " + e.getMessage());
         }
+    }
+
+    /** 识别回调：两种会话实现共用（partial 推中间结果，final 触发回复） */
+    private AsrSession.Listener listenerOf(WebSocketSession session, SessionState state) {
+        return new AsrSession.Listener() {
+            @Override
+            public void onPartialResult(String text) {
+                sendJson(session, "partial", Map.of("text", text == null ? "" : text));
+            }
+
+            @Override
+            public void onFinalResult(String text) {
+                startReply(session, state, text);
+            }
+
+            @Override
+            public void onError(String message) {
+                sendError(session, message);
+            }
+        };
     }
 
     private void handleEnd(WebSocketSession session, SessionState state) {

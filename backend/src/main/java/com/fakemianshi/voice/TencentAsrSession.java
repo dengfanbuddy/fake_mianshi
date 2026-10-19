@@ -32,28 +32,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>基于 JDK 自带 {@link java.net.http.WebSocket} 实现，不引入第三方 WS 客户端依赖。
  * 签名算法与官方 SDK 一致：{@code signature = base64(HmacSHA1(secretKey, "asr.cloud.tencent.com/asr/v2/{appid}?排序后query"))}。
  */
-public class TencentAsrSession implements AutoCloseable {
+public class TencentAsrSession implements AsrSession {
 
     private static final Logger log = LoggerFactory.getLogger(TencentAsrSession.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String HOST = "asr.cloud.tencent.com/asr/v2/";
     private static final String WSS_URL = "wss://asr.cloud.tencent.com/asr/v2/";
 
-    /** 识别结果回调 */
-    public interface Listener {
-        void onPartialResult(String text);
-
-        void onFinalResult(String text);
-
-        void onError(String message);
-    }
-
     private final WebSocket webSocket;
-    private final Listener listener;
+    private final AsrSession.Listener listener;
     private final StringBuilder finalText = new StringBuilder();
     private final AtomicBoolean finished = new AtomicBoolean(false);
 
-    private TencentAsrSession(WebSocket webSocket, Listener listener) {
+    private TencentAsrSession(WebSocket webSocket, AsrSession.Listener listener) {
         this.webSocket = webSocket;
         this.listener = listener;
     }
@@ -62,7 +53,7 @@ public class TencentAsrSession implements AutoCloseable {
      * 建立实时识别连接（阻塞直到握手完成）。
      */
     public static TencentAsrSession open(String secretId, String secretKey, String appId,
-                                         Listener listener, HttpClient httpClient) {
+                                         AsrSession.Listener listener, HttpClient httpClient) {
         String url = buildUrl(secretId, secretKey, appId);
         final TencentAsrSession[] holder = new TencentAsrSession[1];
 
@@ -108,6 +99,7 @@ public class TencentAsrSession implements AutoCloseable {
     }
 
     /** 推送一段 PCM 音频（16k/16bit/单声道） */
+    @Override
     public void sendAudio(byte[] pcm16k) {
         if (webSocket != null && !webSocket.isOutputClosed() && pcm16k != null && pcm16k.length > 0) {
             webSocket.sendBinary(ByteBuffer.wrap(pcm16k), true);
@@ -115,6 +107,7 @@ public class TencentAsrSession implements AutoCloseable {
     }
 
     /** 发送结束标记，服务端收到后返回最终识别结果 */
+    @Override
     public void stop() {
         if (webSocket != null && !webSocket.isOutputClosed()) {
             webSocket.sendText("{\"type\":\"end\"}", true);
