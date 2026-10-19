@@ -1,16 +1,18 @@
 <script setup>
-import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
+/**
+ * 笔试答题页外壳。
+ *
+ * 职责只剩三件：加载/恢复考试数据、倒计时、交卷。
+ * 渲染拆到 QuestionItem（单题）与 AnswerCard（答题卡），纯函数在 examHelpers.js。
+ * 拆之前这里是 586 行，改一个选项样式要在倒计时和交卷逻辑之间来回找。
+ */
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { submitTest, getExamInProgress } from '../../api/written-test'
 import { useWrittenTestStore } from '../../stores/writtenTest'
-
-// 题目内容支持 markdown 渲染（代码块、列表等），经 DOMPurify 消毒防 XSS
-function renderMd(text) {
-  if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(text))
-}
+import QuestionItem from './QuestionItem.vue'
+import AnswerCard from './AnswerCard.vue'
+import { buildAnswers, isAnswered } from './examHelpers'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,43 +58,7 @@ watch(answers, persistAnswers, { deep: true })
 
 const qRefs = []
 
-function letter(index) {
-  return String.fromCharCode(65 + index)
-}
-
-function parseOptions(q) {
-  try {
-    const arr = JSON.parse(q.options || '[]')
-    return Array.isArray(arr) ? arr : []
-  } catch (e) {
-    return []
-  }
-}
-
-function isAnswered(q) {
-  const val = answers[q.id]
-  if (q.type === 'MULTIPLE_CHOICE') {
-    return Array.isArray(val) && val.length > 0
-  }
-  return val !== undefined && val !== null && String(val).trim() !== ''
-}
-
-const answeredCount = computed(() => questions.value.filter(q => isAnswered(q)).length)
-const unansweredCount = computed(() => questions.value.length - answeredCount.value)
-
-const typeLabel = {
-  SINGLE_CHOICE: '单选题',
-  MULTIPLE_CHOICE: '多选题',
-  FILL_BLANK: '填空题',
-  SHORT_ANSWER: '简答题',
-}
-
-const typeTagType = {
-  SINGLE_CHOICE: 'primary',
-  MULTIPLE_CHOICE: 'warning',
-  FILL_BLANK: 'success',
-  SHORT_ANSWER: 'info',
-}
+const answeredCount = computed(() => questions.value.filter((q) => isAnswered(q, answers)).length)
 
 function formatTime(ms) {
   if (ms < 0) ms = 0
@@ -100,7 +66,7 @@ function formatTime(ms) {
   const h = Math.floor(totalSec / 3600)
   const m = Math.floor((totalSec % 3600) / 60)
   const s = totalSec % 60
-  const pad = n => String(n).padStart(2, '0')
+  const pad = (n) => String(n).padStart(2, '0')
   return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
@@ -138,27 +104,11 @@ function scrollTo(index) {
   qRefs[index]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
-function buildAnswers() {
-  const result = {}
-  for (const q of questions.value) {
-    const val = answers[q.id]
-    if (q.type === 'MULTIPLE_CHOICE') {
-      if (Array.isArray(val) && val.length > 0) {
-        // 多选题答案按字母排序，如 "AB"
-        result[q.id] = [...val].sort().join('')
-      }
-    } else if (val !== undefined && val !== null && String(val).trim() !== '') {
-      result[q.id] = String(val).trim()
-    }
-  }
-  return result
-}
-
 async function handleSubmit() {
   if (submitting.value) return
   submitting.value = true
   try {
-    const res = await submitTest(sessionId, buildAnswers())
+    const res = await submitTest(sessionId, buildAnswers(questions.value, answers))
     if (res.code === 200) {
       // 服务端计时校验结果：超时提交照常出成绩，但明确告知用户成绩仅供参考
       if (res.data?.expired) {
@@ -183,6 +133,18 @@ async function handleSubmit() {
   } finally {
     submitting.value = false
   }
+}
+
+function initExam(list, deadline) {
+  questions.value = list
+  // 初始化答案容器（多选为数组）
+  for (const q of questions.value) {
+    answers[q.id] = q.type === 'MULTIPLE_CHOICE' ? [] : ''
+  }
+  // 恢复刷新前已填写的答案
+  restoreAnswers()
+  loaded.value = true
+  startCountdown(deadline)
 }
 
 onMounted(async () => {
@@ -220,21 +182,7 @@ onMounted(async () => {
   router.replace('/')
 })
 
-function initExam(list, deadline) {
-  questions.value = list
-  // 初始化答案容器（多选为数组）
-  for (const q of questions.value) {
-    answers[q.id] = q.type === 'MULTIPLE_CHOICE' ? [] : ''
-  }
-  // 恢复刷新前已填写的答案
-  restoreAnswers()
-  loaded.value = true
-  startCountdown(deadline)
-}
-
-onBeforeUnmount(() => {
-  stopCountdown()
-})
+onBeforeUnmount(stopCountdown)
 </script>
 
 <template>
@@ -254,98 +202,26 @@ onBeforeUnmount(() => {
       <div class="question-area">
         <el-scrollbar class="question-scroll">
           <div v-if="loaded" class="question-list">
-            <div
+            <QuestionItem
               v-for="(q, idx) in questions"
               :key="q.id"
-              :ref="el => setQRef(idx, el)"
-              class="question-item"
-            >
-              <div class="q-head">
-                <span class="q-index">{{ idx + 1 }}</span>
-                <el-tag :type="typeTagType[q.type]" size="small" effect="plain">
-                  {{ typeLabel[q.type] || q.type }}
-                </el-tag>
-              </div>
-              <div class="q-content markdown-body" v-html="renderMd(q.content)"></div>
-
-              <!-- 单选题 -->
-              <el-radio-group v-if="q.type === 'SINGLE_CHOICE'" v-model="answers[q.id]" class="q-options">
-                <el-radio
-                  v-for="(opt, i) in parseOptions(q)"
-                  :key="i"
-                  :value="letter(i)"
-                  class="q-option"
-                >
-                  <span class="opt-key">{{ letter(i) }}.</span> {{ opt }}
-                </el-radio>
-              </el-radio-group>
-
-              <!-- 多选题 -->
-              <el-checkbox-group v-else-if="q.type === 'MULTIPLE_CHOICE'" v-model="answers[q.id]" class="q-options">
-                <el-checkbox
-                  v-for="(opt, i) in parseOptions(q)"
-                  :key="i"
-                  :value="letter(i)"
-                  class="q-option"
-                >
-                  <span class="opt-key">{{ letter(i) }}.</span> {{ opt }}
-                </el-checkbox>
-              </el-checkbox-group>
-
-              <!-- 填空题 -->
-              <div v-else-if="q.type === 'FILL_BLANK'" class="q-input">
-                <el-input v-model="answers[q.id]" placeholder="请输入你的答案" clearable />
-              </div>
-
-              <!-- 简答题 -->
-              <div v-else-if="q.type === 'SHORT_ANSWER'" class="q-input">
-                <el-input
-                  v-model="answers[q.id]"
-                  type="textarea"
-                  :rows="4"
-                  placeholder="请输入你的回答"
-                  show-word-limit
-                  maxlength="2000"
-                />
-              </div>
-            </div>
+              :ref="(el) => setQRef(idx, el)"
+              :question="q"
+              :index="idx"
+              v-model="answers[q.id]"
+            />
           </div>
         </el-scrollbar>
       </div>
 
       <!-- 答题卡 -->
-      <div class="answer-card">
-        <el-card shadow="never" class="card">
-          <div class="card-title">答题卡</div>
-          <div class="grid">
-            <div
-              v-for="(q, idx) in questions"
-              :key="q.id"
-              :class="['num', { answered: isAnswered(q) }]"
-              @click="scrollTo(idx)"
-            >
-              {{ idx + 1 }}
-            </div>
-          </div>
-          <div class="legend">
-            <span class="legend-item"><span class="dot answered"></span>已答</span>
-            <span class="legend-item"><span class="dot"></span>未答</span>
-          </div>
-          <el-popconfirm
-            :title="unansweredCount > 0 ? `还有 ${unansweredCount} 题未答，确认要交卷吗？` : '确认要交卷吗？'"
-            confirm-button-text="确认交卷"
-            cancel-button-text="再检查一下"
-            width="260"
-            @confirm="handleSubmit"
-          >
-            <template #reference>
-              <el-button type="primary" class="submit-btn" :loading="submitting" style="width: 100%">
-                交卷
-              </el-button>
-            </template>
-          </el-popconfirm>
-        </el-card>
-      </div>
+      <AnswerCard
+        :questions="questions"
+        :answers="answers"
+        :submitting="submitting"
+        @goto="scrollTo"
+        @submit="handleSubmit"
+      />
     </div>
   </div>
 </template>
@@ -419,87 +295,6 @@ onBeforeUnmount(() => {
 .question-list {
   padding: 16px 20px;
 }
-.question-item {
-  padding: 20px 0;
-  border-bottom: 1px solid #f0f2f5;
-}
-.question-item:last-child {
-  border-bottom: none;
-}
-.q-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.q-index {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #409eff;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-.q-content {
-  font-size: 15px;
-  line-height: 1.6;
-  color: #303133;
-  margin-bottom: 14px;
-  word-break: break-word;
-}
-.q-content :deep(h1), .q-content :deep(h2), .q-content :deep(h3), .q-content :deep(h4) {
-  font-size: 15px;
-  margin: 8px 0 4px;
-}
-.q-content :deep(ul), .q-content :deep(ol) {
-  margin: 4px 0;
-  padding-left: 20px;
-}
-.q-content :deep(p) {
-  margin: 4px 0;
-}
-.q-content :deep(code) {
-  background: #f0f2f5;
-  border-radius: 3px;
-  padding: 1px 5px;
-  font-size: 13px;
-}
-.q-content :deep(pre) {
-  background: #f6f8fa;
-  border-radius: 6px;
-  padding: 10px;
-  overflow-x: auto;
-}
-.q-options {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-}
-.q-option {
-  display: flex;
-  align-items: flex-start;
-  height: auto;
-  white-space: normal;
-  line-height: 1.5;
-}
-.opt-key {
-  font-weight: 600;
-  margin-right: 2px;
-}
-.q-input {
-  max-width: 600px;
-}
-
-/* 答题卡 */
-.answer-card {
-  width: 230px;
-  flex-shrink: 0;
-}
 
 /* 窄屏适配：答题卡移到题目下方，纵向滚动 */
 @media (max-width: 768px) {
@@ -518,69 +313,5 @@ onBeforeUnmount(() => {
     height: auto;
     max-height: 55vh;
   }
-  .answer-card {
-    width: 100%;
-    order: 2;
-  }
-}
-.card {
-  border-radius: 8px;
-}
-.card-title {
-  font-size: 15px;
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.num {
-  aspect-ratio: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  font-size: 13px;
-  color: #606266;
-  cursor: pointer;
-  transition: all 0.2s;
-  background: #fff;
-}
-.num:hover {
-  border-color: #409eff;
-  color: #409eff;
-}
-.num.answered {
-  background: #409eff;
-  border-color: #409eff;
-  color: #fff;
-}
-.legend {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  font-size: 13px;
-  color: #606266;
-}
-.legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
-  border: 1px solid #dcdfe6;
-  display: inline-block;
-  background: #fff;
-}
-.dot.answered {
-  background: #409eff;
-  border-color: #409eff;
 }
 </style>
