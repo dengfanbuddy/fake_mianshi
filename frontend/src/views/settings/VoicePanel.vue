@@ -115,12 +115,17 @@ async function startLocalVoiceService() {
 
 async function stopLocalVoiceService() {
   if (localStopping.value) return
+  // 不是后端托管、但端口上有服务在跑：这多半是崩溃遗留的孤儿，允许强制结束（后端会校验 cwd）
+  const force = !localProcess.value?.managed
   localStopping.value = true
   try {
-    const res = await stopLocalVoice()
+    const res = await stopLocalVoice(force)
     if (res.code === 200) {
       const data = res.data || {}
-      if (data.stopped) {
+      if (data.stopped && data.freed === false) {
+        // 端口还开着 = 显存大概率没释放，必须明确告警而不是报成功
+        ElMessage.warning(data.message || '进程已结束，但端口仍在监听，显存可能未释放')
+      } else if (data.stopped) {
         ElMessage.success(data.message || '已结束本地语音服务')
         localHealth.value = { reachable: false }
       } else {
@@ -298,17 +303,22 @@ onBeforeUnmount(stopLocalPolling)
           </el-button>
           <el-button
             :loading="localStopping"
-            :disabled="!localProcess?.managed"
+            :disabled="!localProcess?.managed && !localHealth?.reachable"
             style="margin-left: 12px"
             @click="stopLocalVoiceService"
           >
-            停止
+            {{ localProcess?.managed ? '停止' : '强制停止' }}
           </el-button>
           <el-tag :type="localProcessTagType" style="margin-left: 12px">
             {{ localProcessText }}
           </el-tag>
           <div v-if="localProcess?.lastError" class="hint error-hint">
             上次启动失败：{{ localProcess.lastError }}
+          </div>
+          <div v-if="localProcess?.portListening && !localProcess?.managed" class="hint error-hint">
+            端口 {{ localProcess?.baseUrl }} 上有服务在跑但不由后端托管（多半是上次后端崩溃遗留的孤儿，
+            占着显存）。点「强制停止」可以回收；后端已经关掉时执行
+            <code>pwsh -File voice-service/stop.ps1</code>。
           </div>
         </el-form-item>
         <el-form-item label="服务地址">

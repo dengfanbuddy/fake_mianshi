@@ -15,6 +15,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -29,9 +31,11 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -59,6 +63,12 @@ public class LocalVoiceProcessManager {
     /** 页面展示的行数 */
     private static final int LOG_TAIL = 40;
 
+    /** 优雅结束之后最多等这么久看端口是否关闭，超过就直接强杀整棵树 */
+    private static final int GRACEFUL_WAIT_SECONDS = 3;
+
+    /** 端口探测的连接超时（本机回环，连接被拒是立即返回的） */
+    private static final int PORT_PROBE_TIMEOUT_MS = 300;
+
     private final VoiceProperties voiceProperties;
     private final LocalQwenVoiceService localQwenVoiceService;
     private final VoiceConfigService voiceConfigService;
@@ -69,6 +79,13 @@ public class LocalVoiceProcessManager {
     private Process process;
     /** 接管来的进程句柄（上次硬杀遗留的孤儿），没有则为 null */
     private ProcessHandle adoptedHandle;
+    /**
+     * sidecar 自报的 PID（{@code /health} 返回的 {@code pid}）。
+     *
+     * <p>它才是真正占显存的进程：venv 里的 {@code python.exe} 只是启动器，
+     * 会再拉起一个 base 解释器去跑 uvicorn，两者 PID 不同。结束时要把它也算上。
+     */
+    private Long serverPid;
     /** 是否有归属于本后端（含接管）的进程；决定能否结束它 */
     private boolean owned;
     private Instant startedAt;
@@ -114,18 +131,38 @@ public class LocalVoiceProcessManager {
         }
     }
 
-    /** 后端关闭：只结束归属于本后端的 sidecar */
+    /**
+     * 后端关闭：结束 sidecar 并确认真的是"关掉了"。
+     *
+     * <p>不能只看"我是有所有权的"：上次硬杀会留下 pid 文件丢失的孤儿，
+     * 那种情况下 {@code owned} 是 false，但如果端口在监听、且 {@code /health} 自报的
+     * 工作目录就是本项目的 voice-service，那它仍然是本后端的遗留，必须清理——
+     * 否则用户看到的就是"后端停了，显存没降"。
+     */
     @PreDestroy
     public void shutdown() {
         if (!voiceProperties.getLocal().isStopOnShutdown()) {
             return;
         }
         synchronized (lock) {
-            if (!ownedProcessAlive()) {
-                return;
+            boolean ownedAlive = ownedProcessAlive();
+            if (!ownedAlive && !owned) {
+                Long orphanPid = ownSidecarPidFromHealth();
+                if (orphanPid == null) {
+                    return;
+                }
+                log.warn("后端关闭：发现未被记录的本地语音 sidecar 孤儿 (PID {})，一并结束", orphanPid);
+                serverPid = orphanPid;
             }
-            log.info("后端关闭，结束本地语音 sidecar (PID {})", ownedPid());
-            killOwned();
+            Long pid = ownedPid();
+            log.info("后端关闭，结束本地语音 sidecar (PID {})", pid == null ? serverPid : pid);
+            boolean freed = killOwned();
+            if (freed) {
+                log.info("本地语音 sidecar 已结束，端口已释放");
+            } else {
+                log.error("本地语音 sidecar 未能完全结束，端口仍在监听（显存可能没释放）。"
+                        + "可执行 voice-service/stop.ps1 手动清理，或下次启动时会重试接管");
+            }
         }
     }
 
@@ -139,6 +176,7 @@ public class LocalVoiceProcessManager {
     public Map<String, Object> start() {
         synchronized (lock) {
             Map<String, Object> result = new LinkedHashMap<>();
+            Endpoint endpoint = resolveEndpoint();
             if (reachable()) {
                 result.put("started", false);
                 result.put("reason", "already-running");
@@ -167,20 +205,8 @@ public class LocalVoiceProcessManager {
                         + "或配置 app.voice.local.python");
             }
 
-            String host = "127.0.0.1";
-            int port = 9100;
-            try {
-                URI base = URI.create(localQwenVoiceService.baseUrl());
-                if (base.getHost() != null) {
-                    host = base.getHost();
-                }
-                if (base.getPort() > 0) {
-                    port = base.getPort();
-                }
-            } catch (IllegalArgumentException e) {
-                log.warn("本地语音地址解析失败，回退 127.0.0.1:9100: {}", e.getMessage());
-            }
-
+            String host = endpoint.host();
+            int port = endpoint.port();
             List<String> command = new ArrayList<>(List.of(
                     python, "-m", "uvicorn", "app.main:app",
                     "--host", host, "--port", String.valueOf(port)));
@@ -225,28 +251,44 @@ public class LocalVoiceProcessManager {
     /**
      * 结束归属于本后端的 sidecar。
      *
-     * <p>外部实例一律不碰——只回报"不是由后端启动的"。
+     * <p>外部实例一律不碰——只回报"不是由后端启动的"。{@code force=true} 时例外：
+     * 若 {@code /health} 自报的工作目录就是本项目的 voice-service（相当于"本后端遗留但记录丢失"），
+     * 也结束它。这是给"后端已经崩了、显存还被占着"准备的直通车。
      */
     public Map<String, Object> stop() {
+        return stop(false);
+    }
+
+    public Map<String, Object> stop(boolean force) {
         synchronized (lock) {
             Map<String, Object> result = new LinkedHashMap<>();
-            if (!ownedProcessAlive() || !owned) {
-                result.put("stopped", false);
-                result.put("reason", "not-managed");
-                result.put("managed", false);
-                result.put("message", reachable()
-                        ? "本地语音服务在运行，但不是由后端启动的，未结束该进程"
-                        : "本地语音服务当前未在运行");
-                return result;
+            boolean managed = owned && ownedProcessAlive();
+            if (!managed) {
+                Long orphanPid = force ? ownSidecarPidFromHealth() : null;
+                if (orphanPid == null) {
+                    result.put("stopped", false);
+                    result.put("reason", "not-managed");
+                    result.put("managed", false);
+                    result.put("message", reachable()
+                            ? "本地语音服务在运行，但不是由后端启动的，未结束该进程"
+                            : "本地语音服务当前未在运行");
+                    return result;
+                }
+                serverPid = orphanPid;
             }
             Long pid = ownedPid();
-            killOwned();
-            log.info("已结束本地语音 sidecar (PID {})", pid);
+            boolean freed = killOwned();
+            log.info("结束本地语音 sidecar (PID {})，端口{}", pid == null ? serverPid : pid,
+                    freed ? "已释放" : "仍在监听");
             result.put("stopped", true);
-            result.put("reason", "stopped");
+            result.put("reason", freed ? "stopped" : "stop-incomplete");
             result.put("managed", false);
-            result.put("pid", pid);
-            result.put("message", "已结束本地语音服务（PID " + pid + "）");
+            result.put("pid", pid == null ? serverPid : pid);
+            result.put("freed", freed);
+            result.put("message", freed
+                    ? "已结束本地语音服务（PID " + (pid == null ? serverPid : pid) + "），端口与显存已释放"
+                    : "已尝试结束本地语音服务，但端口 " + resolveEndpoint().port()
+                            + " 仍在监听（可能显存未释放）。请查看日志，或用 voice-service/stop.ps1 手动清理");
             return result;
         }
     }
@@ -260,6 +302,8 @@ public class LocalVoiceProcessManager {
             result.put("running", alive);
             result.put("pid", ownedPid());
             result.put("adopted", alive && process == null && adoptedHandle != null);
+            result.put("serverPid", serverPid);
+            result.put("portListening", portListening());
             result.put("startedAt", startedAt == null ? null : startedAt.toString());
             result.put("uptimeSeconds", alive && startedAt != null
                     ? Duration.between(startedAt, Instant.now()).getSeconds() : null);
@@ -300,26 +344,46 @@ public class LocalVoiceProcessManager {
      * <p>关闭钩子在硬杀（IDE 停止按钮、崩溃、断电）时不会执行，此时上次拉起的 Python 仍在占显存。
      * pid 文件只由本后端写入，因此"文件里的 PID 仍活着"可以安全判定为<b>自己的遗留</b>并接管，
      * 让它在下次正常关闭时被清理。
+     *
+     * <p>还有第二种遗留形态：<b>pid 文件已经没了</b>（被删、被清理、或写失败），进程却还在占着显存。
+     * 这时按 {@code /health} 自报的 {@code cwd} 判定——工作目录就是本项目的 voice-service，
+     * 那它只可能是本项目的实例，接管它；否则一律当外部实例不碰。
      */
     private void adoptLeftover() {
         Long stalePid = readPidFile();
-        if (stalePid == null) {
-            return;
-        }
-        Optional<ProcessHandle> handle = ProcessHandle.of(stalePid);
-        if (handle.isEmpty() || !handle.get().isAlive()) {
-            clearPidFile();
-            return;
-        }
-        synchronized (lock) {
-            if (ownedProcessAlive()) {
+        if (stalePid != null) {
+            Optional<ProcessHandle> handle = ProcessHandle.of(stalePid);
+            if (handle.isPresent() && handle.get().isAlive()) {
+                synchronized (lock) {
+                    if (ownedProcessAlive()) {
+                        return;
+                    }
+                    adoptedHandle = handle.get();
+                    owned = true;
+                    startedAt = null;
+                    log.info("接管上次遗留的本地语音 sidecar (PID {})，将在后端关闭时结束它", stalePid);
+                }
                 return;
             }
-            adoptedHandle = handle.get();
-            owned = true;
-            startedAt = null;
-            log.info("接管上次遗留的本地语音 sidecar (PID {})，将在后端关闭时结束它", stalePid);
+            clearPidFile();
         }
+        Long orphanPid = ownSidecarPidFromHealth();
+        if (orphanPid == null) {
+            return;
+        }
+        ProcessHandle.of(orphanPid).ifPresent(handle -> {
+            synchronized (lock) {
+                if (ownedProcessAlive()) {
+                    return;
+                }
+                adoptedHandle = handle;
+                serverPid = handle.pid();
+                owned = true;
+                startedAt = null;
+            }
+            log.warn("发现 pid 文件里没有记录的本地语音 sidecar 孤儿 (PID {})，已接管，将在后端关闭时结束它",
+                    handle.pid());
+        });
     }
 
     /** sidecar 是否可连通（每次现探，避免缓存挡住"刚刚起来"的实例） */
@@ -333,25 +397,121 @@ public class LocalVoiceProcessManager {
         }
     }
 
-    /** 结束归属本后端的进程（子进程或接管来的句柄），并清理状态与 pid 文件 */
-    private void killOwned() {
-        if (process != null && process.isAlive()) {
-            destroyHandleTree(process.toHandle());
-        } else if (adoptedHandle != null && adoptedHandle.isAlive()) {
-            destroyHandleTree(adoptedHandle);
+    /**
+     * 问 sidecar 要它自己的 PID（{@code /health} 的 {@code pid}）。
+     *
+     * <p>这个值才是"真正占显存的进程"：venv 的 python.exe 是启动器，它再拉起 base 解释器。
+     */
+    private Long probeServerPid() {
+        try {
+            Map<String, Object> health = localQwenVoiceService.health();
+            if (!Boolean.TRUE.equals(health.get("reachable"))) {
+                return null;
+            }
+            Object pid = health.get("pid");
+            return pid instanceof Number number && number.longValue() > 0 ? number.longValue() : null;
+        } catch (RuntimeException e) {
+            log.debug("向 sidecar 询问 PID 失败: {}", e.getMessage());
+            return null;
         }
+    }
+
+    /**
+     * 端口在监听、且 {@code /health} 自报的工作目录就是本项目的 voice-service 时，
+     * 返回它的 PID；否则返回 null（说明是别人的服务，不能碰）。
+     */
+    private Long ownSidecarPidFromHealth() {
+        File serviceDir = resolveServiceDir();
+        if (serviceDir == null) {
+            return null;
+        }
+        Map<String, Object> health;
+        try {
+            health = localQwenVoiceService.health();
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (!Boolean.TRUE.equals(health.get("reachable"))) {
+            return null;
+        }
+        Object cwd = health.get("cwd");
+        if (!(cwd instanceof String text) || text.isBlank() || !samePath(text, serviceDir.getAbsolutePath())) {
+            return null;
+        }
+        Object pid = health.get("pid");
+        return pid instanceof Number number && number.longValue() > 0 ? number.longValue() : null;
+    }
+
+    private static boolean samePath(String a, String b) {
+        return normalizePath(a).equals(normalizePath(b));
+    }
+
+    private static String normalizePath(String path) {
+        return path.replace('\\', '/').replaceAll("/+$", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * 结束归属本后端的进程，并**验证端口真的关闭了**。
+     *
+     * <p>判据必须是「端口关闭」而不是「记录的 PID 退出了」：启动器退出不代表真正干活的解释器退出，
+     * 而显存挂在后者身上。只认 PID 的写法会把"启动器已死、worker 还占着 4GB"报成成功。
+     *
+     * @return 端口是否已释放（false 表示可能仍在占显存，调用方必须如实告知用户）
+     */
+    private boolean killOwned() {
+        ProcessHandle root = process != null && process.isAlive() ? process.toHandle()
+                : (adoptedHandle != null && adoptedHandle.isAlive() ? adoptedHandle : null);
+        Set<Long> targets = new LinkedHashSet<>();
+        if (root != null) {
+            targets.add(root.pid());
+        }
+        Long probed = probeServerPid();
+        if (probed != null) {
+            serverPid = probed;
+            targets.add(probed);
+        }
+
+        if (root != null) {
+            destroyHandleTree(root);
+            // 端口关闭才是成功判据；启动器退出得再快也不能算
+            if (waitUntilPortClosed(Math.min(GRACEFUL_WAIT_SECONDS,
+                    Math.max(1, voiceProperties.getLocal().getStopTimeoutSeconds())))) {
+                clearOwnedState(true);
+                return true;
+            }
+        }
+        if (!targets.isEmpty()) {
+            forceKillTrees(targets);
+            if (waitUntilPortClosed(Math.max(1, voiceProperties.getLocal().getStopTimeoutSeconds()))) {
+                clearOwnedState(true);
+                return true;
+            }
+        }
+        boolean freed = !portListening();
+        // 没释放成功就保留 pid 文件：下次启动会据此(或据 /health)再次接管重试
+        clearOwnedState(freed);
+        if (!freed) {
+            log.warn("sidecar 结束失败，仍在监听的进程可能是启动器拉起的解释器，请执行 "
+                    + "voice-service/stop.ps1 清理；已尝试的 PID: {}", targets);
+        }
+        return freed;
+    }
+
+    private void clearOwnedState(boolean alsoClearPidFile) {
         process = null;
         adoptedHandle = null;
         owned = false;
         startedAt = null;
-        clearPidFile();
+        serverPid = null;
+        if (alsoClearPidFile) {
+            clearPidFile();
+        }
     }
 
     /**
-     * 结束进程树。
+     * 先礼：结束进程树（含子孙），等 {@code stop-timeout-seconds}，超时后强杀。
      *
-     * <p>先优雅 destroy 并等待 {@code stop-timeout-seconds}，超时后强杀。
-     * Windows 上 uvicorn 常由一个启动器 python 拉起真正的 worker（父子两个 PID），
+     * <p>Windows 上 uvicorn 常由一个启动器 python 拉起真正的 worker（父子两个 PID），
      * 只杀父会留下占显存的子进程，故必须连子孙一起处理。
      */
     private void destroyHandleTree(ProcessHandle root) {
@@ -373,6 +533,98 @@ public class LocalVoiceProcessManager {
             descendants.forEach(ProcessHandle::destroyForcibly);
             root.destroyForcibly();
         }
+    }
+
+    /**
+     * 后兵：按 PID 强杀整棵进程树。
+     *
+     * <p>Windows 用 {@code taskkill /T /F}——它走操作系统的父子链，能穿过
+     * "venv 启动器 → 真解释器"这一层；而 {@link ProcessHandle#descendants()} 对
+     * 不是本 JVM 创建的进程（接管来的孤儿）并不可靠，可能给出空集合。
+     */
+    private void forceKillTrees(Set<Long> pids) {
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        for (Long pid : pids) {
+            if (pid == null || pid <= 0 || !isAlive(pid)) {
+                continue;
+            }
+            if (windows) {
+                runQuietly(List.of("taskkill", "/T", "/F", "/PID", String.valueOf(pid)));
+            }
+            ProcessHandle.of(pid).filter(ProcessHandle::isAlive).ifPresent(ProcessHandle::destroyForcibly);
+        }
+        // taskkill 之外的兜底：子孙也直接强杀一遍
+        for (Long pid : pids) {
+            ProcessHandle.of(pid).ifPresent(handle -> handle.descendants()
+                    .filter(ProcessHandle::isAlive)
+                    .forEach(ProcessHandle::destroyForcibly));
+        }
+    }
+
+    private static boolean isAlive(long pid) {
+        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
+    }
+
+    private void runQuietly(List<String> command) {
+        try {
+            Process task = new ProcessBuilder(command).redirectErrorStream(true).start();
+            String output = new String(task.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+            task.waitFor(10, TimeUnit.SECONDS);
+            log.debug("{}: {}", String.join(" ", command), output);
+        } catch (IOException e) {
+            log.debug("执行 {} 失败: {}", String.join(" ", command), e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** sidecar 监听地址 */
+    private record Endpoint(String host, int port) {
+    }
+
+    private Endpoint resolveEndpoint() {
+        String host = "127.0.0.1";
+        int port = 9100;
+        try {
+            URI base = URI.create(localQwenVoiceService.baseUrl());
+            if (base.getHost() != null) {
+                host = base.getHost();
+            }
+            if (base.getPort() > 0) {
+                port = base.getPort();
+            }
+        } catch (IllegalArgumentException e) {
+            log.warn("本地语音地址解析失败，回退 127.0.0.1:9100: {}", e.getMessage());
+        }
+        return new Endpoint(host, port);
+    }
+
+    /** 端口是否仍在监听（连得上就算在，200ms 超时避免拖慢调用方） */
+    private boolean portListening() {
+        Endpoint endpoint = resolveEndpoint();
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(endpoint.host(), endpoint.port()), PORT_PROBE_TIMEOUT_MS);
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /** 轮询等待端口关闭，返回是否已关闭 */
+    private boolean waitUntilPortClosed(int seconds) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, seconds));
+        while (System.nanoTime() < deadline) {
+            if (!portListening()) {
+                return true;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return !portListening();
+            }
+        }
+        return !portListening();
     }
 
     /**

@@ -67,12 +67,16 @@ pwsh -File scripts/download_model.ps1 -Model Qwen/Qwen3-ASR-0.6B-hf  # ASR 权�
 | 时机 | 行为 |
 |---|---|
 | 后端启动 | 检测到生效供应商是本地 Qwen 且 9100 没在跑 → **自动拉起 sidecar**（约 30s 加载两张模型） |
-| 后端关闭 | **自动结束**由自己拉起的 sidecar，释放显存 |
-| 崩溃/被硬杀后重启 | 读 `data/voice-sidecar.pid` 接管上次遗留的进程，避免孤儿长期占着显存 |
-| 页面 | 「启动本地服务 / 停止」按钮 + 实时状态 + 最近日志（排错用） |
+| 后端关闭 | **自动结束**由自己拉起的 sidecar，并**确认端口真的关了**才报成功，释放显存 |
+| 崩溃/被硬杀后重启 | 读 `data/voice-sidecar.pid` 接管上次遗留的进程；pid 文件丢了就按 `/health` 自报的 `cwd` 认亲 |
+| 页面 | 「启动本地服务 / 停止（强制停止）」按钮 + 实时状态 + 最近日志（排错用） |
 
 > 你自己手工 `pwsh -File run.ps1` 起的实例，后端只当作"外部实例"：不接管，关后端时也不会杀掉它。
 > 所有权判定见 `docs/adr/0009-local-voice-sidecar-lifecycle.md`。
+
+**后端已经停了、显存却没降？** 执行 `pwsh -File voice-service/stop.ps1`。
+`voice-service/.venv/Scripts/python.exe` 只是启动器，它再拉起一个解释器去跑 uvicorn，
+真正占显存的是后者；`stop.ps1` 会沿父子链把整棵树结束掉，并验证端口是否释放。
 
 自检（延迟/显存/音质）：`cd voice-service && uv run python selfcheck.py`；
 识别基准：`uv run python scripts/bench_asr.py`（TTS→ASR 闭环）。详见 `voice-service/README.md`。
@@ -145,7 +149,7 @@ build-release.cmd
 │   │   ├── dto/          # 出入参（含统一分页 PageResult）
 │   │   ├── voice/        # 语音 WebSocket
 │   │   └── config/       # CORS、异常、种子数据、有界线程池
-│   └── src/test/         # 31 个测试类 · 225 个用例
+│   └── src/test/         # 31 个测试类 · 234 个用例
 ├── frontend/         # Vue3 前端
 │   ├── vite.config.js    # 含 Element Plus 按需引入插件配置
 │   └── src/

@@ -81,10 +81,16 @@ public class VoiceController {
         return ApiResponse.success(localVoiceProcessManager.start());
     }
 
-    /** 结束 sidecar；只结束由本后端拉起的进程，外部实例不碰 */
+    /**
+     * 结束 sidecar；默认只结束由本后端拉起的进程，外部实例不碰。
+     *
+     * @param force 后端已经崩过、pid 记录丢了但仍占显存时用：如果 {@code /health} 自报的工作目录
+     *              就是本项目的 voice-service，也一并结束
+     */
     @PostMapping("/local/stop")
-    public ApiResponse<Map<String, Object>> stopLocal() {
-        return ApiResponse.success(localVoiceProcessManager.stop());
+    public ApiResponse<Map<String, Object>> stopLocal(
+            @RequestParam(name = "force", defaultValue = "false") boolean force) {
+        return ApiResponse.success(localVoiceProcessManager.stop(force));
     }
 
     /** 获取当前生效的语音配置（脱敏，页面回显用） */

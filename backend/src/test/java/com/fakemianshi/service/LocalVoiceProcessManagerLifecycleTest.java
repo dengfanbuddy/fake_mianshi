@@ -5,6 +5,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -50,13 +51,17 @@ class LocalVoiceProcessManagerLifecycleTest {
     private LocalVoiceProcessManager manager;
     private Path fakePython;
     private Path pidFile;
+    private int probePort;
 
     @BeforeEach
     void setUp() throws IOException {
         assumeTrue(System.getProperty("os.name", "").toLowerCase().contains("win"),
                 "桩进程用 Windows .cmd 实现，其他平台跳过");
 
-        tempDir = Path.of("target", "voice-sidecar-lifecycle", UUID.randomUUID().toString());
+        // 必须是绝对路径：桩进程以 serviceDir 为工作目录，相对路径在它里面解析不到，
+        // 桩启动器会静默拉不起子进程，用例就变成"假通过"
+        tempDir = Path.of("target", "voice-sidecar-lifecycle", UUID.randomUUID().toString())
+                .toAbsolutePath();
         Files.createDirectories(tempDir);
 
         // 伪造 voice-service 目录：start() 会校验 app/main.py 是否存在
@@ -85,7 +90,12 @@ class LocalVoiceProcessManagerLifecycleTest {
         properties.getLocal().setStopTimeoutSeconds(5);
 
         localVoiceService = mock(LocalQwenVoiceService.class);
-        when(localVoiceService.baseUrl()).thenReturn("http://127.0.0.1:9100");
+        // 用一个空闲端口而不是固定 9100：新逻辑会真的探这个端口有没有关，
+        // 撞上本机正在跑的真实 sidecar 会让用例莫名其妙地"结束失败"
+        try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+            probePort = probe.getLocalPort();
+        }
+        when(localVoiceService.baseUrl()).thenReturn("http://127.0.0.1:" + probePort);
         // reachable=false 才会真的去 spawn
         when(localVoiceService.health()).thenReturn(Map.of("reachable", false));
 
@@ -201,6 +211,211 @@ class LocalVoiceProcessManagerLifecycleTest {
 
         assertFalse((Boolean) manager.status().get("managed"));
         assertFalse(Files.exists(pidFile), "失效的 pid 文件应被清理");
+    }
+
+    /**
+     * 回归：停止时必须连**子孙进程**一起结束。
+     *
+     * <p>真实事故：`.venv/Scripts/python.exe` 只是个启动器，它再拉起
+     * `Python312/python.exe` 跑 uvicorn，真正占显存的是后者。后端关闭时只结束了启动器，
+     * 占 4GB 显存的子进程变成孤儿——用户只看到「后端停了，显存没降」。
+     *
+     * <p>断言的判据不看进程名（子进程是 cmd/ping，与生产不同形），而看命令行的**唯一路径标记**：
+     * 临时目录名带 UUID，整棵树里任何还活着的进程，命令行里都会带着这个 UUID。
+     */
+    @Test
+    void stopKillsGrandchildrenToo() throws Exception {
+        assumeTrue(wmicAvailable(), "需要 wmic 才能按命令行识别残留进程");
+
+        // 桩启动器：拉起一个常驻子进程（模拟"真干活的那个 python"），自己再常驻
+        Path worker = tempDir.resolve("worker.cmd");
+        Files.writeString(worker, String.join("\r\n",
+                "@echo off",
+                ":loop",
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+                ""));
+        Path treeLauncher = tempDir.resolve("fake-python-tree.cmd");
+        Files.writeString(treeLauncher, String.join("\r\n",
+                "@echo off",
+                "set \"IGNORED=%*\"",
+                "start \"\" /b \"%ComSpec%\" /c \"" + worker + "\"",
+                ":loop",
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+                ""));
+        properties.getLocal().setPython(treeLauncher.toString());
+
+        Map<String, Object> started = manager.start();
+        long rootPid = ((Number) started.get("pid")).longValue();
+        String token = tempDir.getFileName().toString();
+
+        // 等子进程真的起来（否则断言会假通过）
+        assertTrue(waitForProcessMentioning(token, 2), "桩进程树应当包含子进程");
+
+        manager.stop();
+
+        assertProcessGone(rootPid);
+        assertFalse(anyProcessMentioning(token),
+                "整棵进程树都必须结束：留下子进程就是留下占显存的孤儿");
+    }
+
+    /**
+     * 回归：接管来的孤儿（pid 文件里记着、但不是本进程拉起的）也要连子孙一起结束。
+     *
+     * <p>这是事故的真实形态——上次后端被硬杀，本次启动靠 pid 文件接管，
+     * 而 {@code ProcessHandle.descendants()} 对"不是自己创建的进程"在 Windows 上给不出子孙，
+     * 于是只杀掉启动器、显存照旧被占。
+     */
+    @Test
+    void shutdownKillsDescendantsOfAdoptedOrphan() throws Exception {
+        assumeTrue(wmicAvailable(), "需要 wmic 才能按命令行识别残留进程");
+
+        Path worker = tempDir.resolve("worker.cmd");
+        Files.writeString(worker, String.join("\r\n",
+                "@echo off",
+                ":loop",
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+                ""));
+        Path treeLauncher = tempDir.resolve("fake-python-tree.cmd");
+        Files.writeString(treeLauncher, String.join("\r\n",
+                "@echo off",
+                "start \"\" /b \"%ComSpec%\" /c \"" + worker + "\"",
+                ":loop",
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+                ""));
+
+        Process orphan = new ProcessBuilder(treeLauncher.toString()).start();
+        long orphanPid = orphan.pid();
+        try {
+            Files.writeString(pidFile, Long.toString(orphanPid));
+            String token = tempDir.getFileName().toString();
+            assertTrue(waitForProcessMentioning(token, 2), "孤儿进程树应当包含子进程");
+
+            manager.autoStartIfNeeded();
+            assertTrue((Boolean) manager.status().get("adopted"), "应接管遗留进程");
+
+            manager.shutdown();
+
+            assertProcessGone(orphanPid);
+            assertFalse(anyProcessMentioning(token), "接管的孤儿也必须连子孙一起结束");
+        } finally {
+            orphan.destroyForcibly();
+            Files.deleteIfExists(pidFile);
+        }
+    }
+
+    /**
+     * 端口还开着时必须如实报告"没释放"，不能因为"我拉起的 PID 都死了"就谎报成功。
+     *
+     * <p>这正是线上事故的误导来源：启动器 python 退出了，占显存的解释器还在监听，
+     * 旧实现只看 PID、直接返回成功，用户于是只看到"显存没降又不知道为啥"。
+     */
+    @Test
+    void stopReportsNotFreedWhenPortIsStillListening() throws Exception {
+        properties.getLocal().setStopTimeoutSeconds(1);
+        Map<String, Object> started = manager.start();
+        long pid = ((Number) started.get("pid")).longValue();
+
+        // 用一个占着探活端口的 socket 模拟"真正干活的进程没退"
+        try (java.net.ServerSocket squatter = new java.net.ServerSocket(probePort)) {
+            Map<String, Object> stopped = manager.stop();
+
+            assertTrue((Boolean) stopped.get("stopped"), "该结束的进程仍要结束");
+            assertEquals(Boolean.FALSE, stopped.get("freed"), "端口没关就不能报成功");
+            assertEquals("stop-incomplete", stopped.get("reason"));
+            assertTrue(String.valueOf(stopped.get("message")).contains("仍在监听"),
+                    () -> "消息要告诉用户端口还在: " + stopped.get("message"));
+            assertProcessGone(pid);
+            assertTrue(Files.exists(pidFile), "没释放成功时保留 pid 文件，下次启动据此重试接管");
+        }
+    }
+
+    /**
+     * 回归：pid 文件丢了也要认得出"这是本项目的 sidecar"，并在关闭时清掉。
+     *
+     * <p>否则 {pid 文件被删 + 上次硬杀} 的组合会让孤儿永久占显存，用户没有任何入口能回收。
+     */
+    @Test
+    void adoptsOwnSidecarWhenPidFileIsMissing() throws Exception {
+        Path worker = tempDir.resolve("worker.cmd");
+        Files.writeString(worker, String.join("\r\n",
+                "@echo off",
+                ":loop",
+                "ping -n 2 127.0.0.1 >nul",
+                "goto loop",
+                ""));
+        Process orphan = new ProcessBuilder(worker.toString()).start();
+        long orphanPid = orphan.pid();
+        try {
+            // 没有 pid 文件；只能靠 /health 自报的 pid + cwd 认亲
+            when(localVoiceService.health()).thenReturn(Map.of(
+                    "reachable", true,
+                    "pid", (int) orphanPid,
+                    "cwd", tempDir.resolve("voice-service").toString()));
+
+            manager.autoStartIfNeeded();
+
+            Map<String, Object> status = manager.status();
+            assertTrue((Boolean) status.get("adopted"), "应接管这个孤儿");
+            assertEquals(orphanPid, ((Number) status.get("pid")).longValue());
+
+            manager.shutdown();
+
+            assertProcessGone(orphanPid);
+        } finally {
+            orphan.destroyForcibly();
+        }
+    }
+
+    /** cwd 不是本项目的实例（别人在别的目录跑的服务）不能被接管 */
+    @Test
+    void doesNotAdoptForeignSidecarWhenPidFileIsMissing() {
+        long foreignPid = ProcessHandle.current().pid();
+        when(localVoiceService.health()).thenReturn(Map.of(
+                "reachable", true,
+                "pid", (int) foreignPid,
+                "cwd", "D:\\somewhere\\else\\voice-service"));
+
+        manager.autoStartIfNeeded();
+
+        assertFalse((Boolean) manager.status().get("managed"), "别的目录的服务不能碰");
+    }
+
+    // ---------------- 按命令行识别残留进程 ----------------
+    private static boolean wmicAvailable() {
+        try {
+            Process p = new ProcessBuilder("wmic", "process", "get", "ProcessId", "/format:csv")
+                    .redirectErrorStream(true).start();
+            // 必须先把输出读干净：进程列表有几百行，管道缓冲写满后 wmic 会阻塞，waitFor 就会假失败
+            p.getInputStream().readAllBytes();
+            return p.waitFor(20, java.util.concurrent.TimeUnit.SECONDS) && p.exitValue() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean anyProcessMentioning(String token) {
+        try {
+            Process p = new ProcessBuilder("wmic", "process", "get", "CommandLine").redirectErrorStream(true).start();
+            String output = new String(p.getInputStream().readAllBytes());
+            p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            return output.contains(token);
+        } catch (Exception e) {
+            throw new AssertionError("查询进程列表失败: " + e.getMessage(), e);
+        }
+    }
+
+    private static boolean waitForProcessMentioning(String token, int minChildren) throws InterruptedException {
+        for (int i = 0; i < 25; i++) {
+            if (anyProcessMentioning(token + File.separator + "worker.cmd")) {
+                return true;
+            }
+            Thread.sleep(200);
+        }
+        return false;
     }
 
     private static boolean isAlive(long pid) {

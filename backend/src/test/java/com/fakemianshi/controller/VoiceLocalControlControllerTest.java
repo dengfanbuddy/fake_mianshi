@@ -70,11 +70,25 @@ class VoiceLocalControlControllerTest {
         Map<String, Object> stopped = new LinkedHashMap<>();
         stopped.put("stopped", false);
         stopped.put("reason", "not-managed");
-        when(localVoiceProcessManager.stop()).thenReturn(stopped);
+        when(localVoiceProcessManager.stop(false)).thenReturn(stopped);
 
         mockMvc.perform(post("/api/voice/local/stop"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.stopped").value(false))
                 .andExpect(jsonPath("$.data.reason").value("not-managed"));
+    }
+
+    /** force=true 是「后端崩过、pid 记录丢了还占着显存」的回收入口 */
+    @Test
+    void stopWithForceFlagReachesManager() throws Exception {
+        Map<String, Object> stopped = new LinkedHashMap<>();
+        stopped.put("stopped", true);
+        stopped.put("freed", true);
+        when(localVoiceProcessManager.stop(true)).thenReturn(stopped);
+
+        mockMvc.perform(post("/api/voice/local/stop").param("force", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.stopped").value(true))
+                .andExpect(jsonPath("$.data.freed").value(true));
     }
 }

@@ -82,6 +82,20 @@
   - **语气/情绪**：MVP 阶段基于文本内容由 LLM 推断（用词、句式等），后续可扩展音频信号分析增强
 - **录音保存**：用户语音录音**保存**，用于回放复盘。音频文件存储于文件系统，数据库仅存路径引用。
 
+### 本地 sidecar 的进程形状（踩过的坑）
+
+`voice-service/.venv/Scripts/python.exe` **只是一个启动器**，它会再拉起
+`Python312/python.exe` 去跑 uvicorn——**真正吃显存的是后者**，两者 PID 不同。
+所以：
+
+- pid 文件里记的启动器 PID ≠ 占显存的进程，`/health` 才会自报 `pid` 与 `cwd`；
+- 结束 sidecar 的**唯一成功判据是"端口 9100 是否关闭"**，不是"记录的 PID 是否退出"
+  （启动器秒退，worker 可能还占着 4GB）；
+- 强杀走 `taskkill /T /F`，它沿操作系统父子链穿过"启动器 → 解释器"这一层，
+  比 `ProcessHandle.descendants()` 可靠（后者对不是本 JVM 创建的进程可能给空集）；
+- 后端已关闭时用 `voice-service/stop.ps1` 回收孤儿，否则显存不会自己降下来。
+
+
 ### 音频链路不变量（踩过的坑）
 
 - **AudioContext 的采样率必须等于 PCM 数据的采样率**。`PcmQueuePlayer` 早期用

@@ -77,3 +77,52 @@ ADR-0004 把 TTS 落地成本地 Qwen3-TTS sidecar（`voice-service/`，Python +
 - 发布包里 `app.jar` 不带 Python 与模型权重，所以"自动拉起"只对**源码目录布局**成立
   （`backend/` 与 `voice-service/` 同级）。分发到别处需配 `app.voice.local.service-dir` 与
   `app.voice.local.python`。这是刻意留的配置口子，而不是自动猜路径。
+
+## 修订（2026-10-20，事故后）
+
+**上面「后端关掉，GPU 显存随之释放，不会留下孤儿进程」当时并不成立。** 真实现象：后端已经停了，
+`nvidia-smi` 仍显示 6.2GB 被占；`wmic` 看到两个 `python.exe`：
+
+```
+21008  .venv\Scripts\python.exe -m uvicorn app.main:app --port 9100      （父 = 后端 JVM）
+36236  D:\MyApplication\Python312\python.exe -m uvicorn app.main:app --port 9100   （父 = 21008）
+```
+
+`.venv/Scripts/python.exe` 只是启动器，它再拉起 base 解释器去跑 uvicorn；
+**真正吃显存的是后者**。原实现有三个洞，叠在一起就成了「后端停了、显存没降、用户无从下手」：
+
+1. **成功判据错了**：只等 `root.onExit()`（启动器退出）。启动器秒退，代码直接 `return`，
+   从没检查真正干活的子进程死没死——启动器已死而 worker 仍占 4GB 时，日志照样写「已结束」。
+2. **接管来的句柄子孙列表不可靠**：`ProcessHandle.descendants()` 对不是本 JVM 创建的进程
+   在 Windows 上可能给空集。崩溃重启后走的正是「接管」路径，于是只杀掉启动器。
+3. **pid 文件丢了就永久失联**：孤儿只靠 pid 文件认领，文件一没（被清理、写失败），
+   就再没有任何代码路径会去回收它。
+
+### 修法：判据换成「端口是否关闭」
+
+- `killOwned()` 以**端口 9100 关闭**为唯一成功判据；`stop()` 返回 `freed` 字段，
+  没关掉就明说「端口仍在监听，显存可能未释放」，不再谎报成功。
+- 强杀走 `taskkill /T /F`（Windows），沿操作系统父子链穿过「启动器 → 解释器」，
+  不依赖 `ProcessHandle.descendants()`；目标 PID 同时包含启动器与 `/health` 自报的 `pid`。
+- `/health` 新增 `pid` 与 `cwd`：`pid` 用于精确结束真正占显存的进程；`cwd` 用于在
+  **pid 文件丢失后**判定「这个在监听 9100 的实例就是本项目的 voice-service」从而接管它。
+  `cwd` 不匹配的一律当外部实例不碰——**所有权不变量没有放松**。
+- 新增 `POST /voice/local/stop?force=true`：后端还活着时回收「未托管的孤儿」的直通车。
+- 新增 `voice-service/stop.ps1`：**后端已经关掉**时的逃生口（按端口 + 命令行定位进程，
+  `taskkill /T` 整棵树，最后验证端口是否真的释放）。
+
+### 回归测试
+
+- `stopKillsGrandchildrenToo` / `shutdownKillsDescendantsOfAdoptedOrphan`：桩进程树带常驻子进程，
+  判据是临时目录 UUID 是否还出现在任何进程的命令行里（不依赖进程名，也就不会写成"看起来过了"）。
+- `stopReportsNotFreedWhenPortIsStillListening`：端口被占时必须报 `freed=false`。
+- `adoptsOwnSidecarWhenPidFileIsMissing` / `doesNotAdoptForeignSidecarWhenPidFileIsMissing`：
+  pid 文件丢失后按 cwd 认亲，以及"别人的实例不许碰"。
+
+### 真机实测（真实模型，非桩进程）
+
+| 场景 | 结果 |
+|---|---|
+| 正常停止 | VRAM 6322 → 2134 MiB，0.16s，端口释放，无残留 python |
+| 模拟崩溃（`taskkill /F` 硬杀 JVM） | VRAM 停在 6240 MiB、端口仍监听 —— 即事故现象复现 |
+| 崩溃后重启 → 接管 → 停止 | 日志「接管上次遗留的本地语音 sidecar (PID 23424)」→ VRAM 6188 → 1975 MiB，pid 文件清理 |

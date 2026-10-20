@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import struct
 import threading
 from contextlib import asynccontextmanager
@@ -102,6 +103,11 @@ def health() -> JSONResponse:
             "load_seconds": engine.load_seconds,
             "load_error": engine.load_error,
             "asr": asr.descriptor(),
+            # 后端结束 sidecar 时要知道"真正占显存的进程是谁"：
+            # .venv/Scripts/python.exe 只是启动器，它会再拉起 base 解释器，两者 PID 不同。
+            # cwd 用于判定"这个在监听 9100 的实例就是我自己的 voice-service"（pid 文件丢失后的兜底）。
+            "pid": os.getpid(),
+            "cwd": os.getcwd(),
         }
     )
 

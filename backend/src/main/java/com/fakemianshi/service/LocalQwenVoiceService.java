@@ -354,8 +354,11 @@ public class LocalQwenVoiceService implements VoiceService {
                         ? null : node.path("load_seconds").asDouble());
                 result.put("loadError", node.path("load_error").isNull()
                         ? null : node.path("load_error").asText());
-                JsonNode asrNode = node.path("asr");
-                if (!asrNode.isMissingNode() && !asrNode.isNull()) {
+                // 真正占显存的解释器 PID，以及它的工作目录（判定"这是不是本项目自己的实例"）
+                long pid = node.path("pid").asLong(0);
+                result.put("pid", pid > 0 ? pid : null);
+                result.put("cwd", node.path("cwd").isNull() ? null : node.path("cwd").asText(null));
+                JsonNode asrNode = node.path("asr");                if (!asrNode.isMissingNode() && !asrNode.isNull()) {
                     result.put("asrEnabled", asrNode.path("enabled").asBoolean(false));
                     result.put("asrLoaded", asrNode.path("loaded").asBoolean(false));
                     result.put("asrModel", asrNode.path("model").asText(null));

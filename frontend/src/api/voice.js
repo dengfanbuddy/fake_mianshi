@@ -30,8 +30,13 @@ export const getLocalVoiceProcess = () => request.get('/voice/local/process')
 // 启动 sidecar（幂等；外部已在运行时不接管）
 export const startLocalVoice = () => request.post('/voice/local/start')
 
-// 结束 sidecar（只结束由后端拉起的进程）
-export const stopLocalVoice = () => request.post('/voice/local/stop')
+/**
+ * 结束 sidecar 并等后端确认真把端口关掉。
+ * @param {boolean} force 后端崩过、pid 记录丢了却仍占显存时用：
+ *   只有 /health 自报的工作目录就是本项目的 voice-service 才会结束它
+ */
+export const stopLocalVoice = (force = false) =>
+  request.post('/voice/local/stop', null, { params: { force } })
 
 // 获取当前生效的语音配置（脱敏回显）
 export const getVoiceConfig = () => request.get('/voice/config')
