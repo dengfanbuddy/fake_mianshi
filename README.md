@@ -74,7 +74,8 @@ pwsh -File scripts/download_model.ps1 -Model Qwen/Qwen3-ASR-0.6B-hf  # ASR 权�
 > 你自己手工 `pwsh -File run.ps1` 起的实例，后端只当作"外部实例"：不接管，关后端时也不会杀掉它。
 > 所有权判定见 `docs/adr/0009-local-voice-sidecar-lifecycle.md`。
 
-**后端已经停了、显存却没降？** 执行 `pwsh -File voice-service/stop.ps1`。
+**后端已经停了、显存却没降？** 执行 `powershell -NoProfile -File voice-service/stop.ps1`
+（PowerShell 7 用 `pwsh -File voice-service/stop.ps1`）。
 `voice-service/.venv/Scripts/python.exe` 只是启动器，它再拉起一个解释器去跑 uvicorn，
 真正占显存的是后者；`stop.ps1` 会沿父子链把整棵树结束掉，并验证端口是否释放。
 

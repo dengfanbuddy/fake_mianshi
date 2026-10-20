@@ -318,7 +318,7 @@ onBeforeUnmount(stopLocalPolling)
           <div v-if="localProcess?.portListening && !localProcess?.managed" class="hint error-hint">
             端口 {{ localProcess?.baseUrl }} 上有服务在跑但不由后端托管（多半是上次后端崩溃遗留的孤儿，
             占着显存）。点「强制停止」可以回收；后端已经关掉时执行
-            <code>pwsh -File voice-service/stop.ps1</code>。
+            <code>powershell -NoProfile -File voice-service/stop.ps1</code>。
           </div>
         </el-form-item>
         <el-form-item label="服务地址">

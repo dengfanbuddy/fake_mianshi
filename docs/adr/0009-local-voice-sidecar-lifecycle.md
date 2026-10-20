@@ -126,3 +126,10 @@ ADR-0004 把 TTS 落地成本地 Qwen3-TTS sidecar（`voice-service/`，Python +
 | 正常停止 | VRAM 6322 → 2134 MiB，0.16s，端口释放，无残留 python |
 | 模拟崩溃（`taskkill /F` 硬杀 JVM） | VRAM 停在 6240 MiB、端口仍监听 —— 即事故现象复现 |
 | 崩溃后重启 → 接管 → 停止 | 日志「接管上次遗留的本地语音 sidecar (PID 23424)」→ VRAM 6188 → 1975 MiB，pid 文件清理 |
+
+### 补记：stop.ps1 的两个坑
+
+- **编码**：PowerShell 5.1 对**没有 BOM** 的 `.ps1` 按系统 ANSI(cp936) 读，中文注释会被解坏，
+  连语法都可能一起坏掉——实测第一版「跑完了、还打印了成功」但一个进程都没杀。文件必须以
+  UTF-8 **带 BOM** 保存，并用 `powershell -NoProfile -File stop.ps1` 运行。
+- **判据同样要验证**：脚本最后重新查一次端口，没释放就 `exit 1`，不能只打印"已结束"。
